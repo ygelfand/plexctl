@@ -1,0 +1,26 @@
+# Binaries
+bin/
+plexctl
+
+# Go
+go.sum
+vendor/
+
+# Node.js
+docs/node_modules/
+docs/.next/
+docs/out/
+.pnpm-store/
+
+# Generated CLI Docs
+docs/pages/cli/*
+!docs/pages/cli/_meta.json
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store

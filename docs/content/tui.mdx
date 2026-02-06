@@ -1,0 +1,42 @@
+# TUI Guide
+
+The plexctl Interactive Interface (TUI) provides a rich, full-screen experience for navigating your Plex library.
+
+## Navigation
+
+- **`Tab` / `Shift+Tab`**: Cycle through main tabs (Home, Libraries, History, etc.)
+- **`j` / `k` (or Arrows)**: Move cursor up and down.
+- **`h` / `l` (or Arrows)**: Move through horizontal lists or scroll columns.
+- **`Enter`**: Select an item or view details.
+- **`Esc`**: Go back or close overlays.
+- **`q`**: Quit the application.
+
+## Global Shortcuts
+
+- **`p`**: Play selected item.
+- **`ctrl+p`**: Play selected item in TCT mode (terminal-based video rendering).
+- **`/`**: Open global fuzzy search.
+- **`l`**: Open library configuration (show/hide/icon picker).
+- **`s`**: Open global settings (theme/icon type).
+- **`r`**: Refresh current view / trigger reindex (on search page).
+- **`x`**: Stop current playback.
+- **`h`**: Jump directly to Home tab.
+- **`?`**: Show help overlay.
+
+## Features
+
+### Fuzzy Search
+Pressing `/` opens a global fuzzy search overlay. It searches across all indexed libraries for titles, actors, and directors. Results are updated instantly as you type.
+
+### Library Configuration
+Pressing `l` opens the configuration manager. Here you can:
+- **Hide/Show** specific library sections.
+- **Assign Custom Icons** using Emojis, Nerd Fonts, or ASCII.
+- **Reorder** how libraries appear in your sidebar.
+
+### Integrated Player
+When playback is started, a playback bar appears at the bottom showing:
+- Current progress and duration.
+- Play/Pause status.
+- Media title.
+You can control the player directly from the TUI using `space` to pause/resume and `x` to stop.

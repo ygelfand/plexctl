@@ -1,0 +1,61 @@
+<div style={{ display: 'flex', alignItems: 'center', gap: '40px', marginBottom: '40px', marginTop: '20px' }}>
+  <div style={{ flex: 1 }}>
+    <h1 style={{ margin: 0, border: 'none', fontSize: '3.5rem' }}>plexctl</h1>
+    <p style={{ margin: 0, fontSize: '1.5rem', fontWeight: '600', lineHeight: '1.2', opacity: 0.9 }}>A robust Plex CLI and TUI written in Go</p>
+  </div>
+  <img src="/logo.png" alt="plexctl logo" width="220" style={{ flexShrink: 0 }} />
+</div>
+
+plexctl is designed for users who want a powerful, terminal-based way to interact with their Plex Media Server. Whether you prefer a rich interactive interface (TUI) or quick command-line actions, plexctl has you covered.
+
+## Demo
+
+![plexctl TUI Demo](/demo.gif)
+
+## Key Features
+
+- **🚀 Interactive TUI**: Navigate libraries, browse media, and manage sessions in a full-screen terminal app.
+- **🔍 Fuzzy Search**: Instantly find movies, shows, or episodes with global fuzzy search.
+- **🎬 Integrated Playback**: Launch media directly in `mpv` with full control.
+- **⚙️ Deep Configuration**: Manage library visibility, custom icons, and theme preferences.
+- **🛠️ Power-User CLI**: Scriptable commands for status, reindexing, and metadata retrieval.
+- **🎨 Theme Support**: Multiple color schemes and icon sets (Emoji, Nerd Fonts, ASCII).
+
+## Getting Started
+
+### Installation
+
+Download the latest binary for your platform from the [GitHub Releases](https://github.com/ygelfand/plexctl/releases) page.
+
+If you have Go installed:
+
+```bash
+go install github.com/ygelfand/plexctl@latest
+```
+
+### Prerequisites
+
+You must have **mpv** installed for media playback:
+
+- **macOS**: `brew install mpv`
+- **Linux**: `sudo apt install mpv` or `sudo pacman -S mpv`
+- **Windows**: Download from [mpv.io](https://mpv.io/)
+
+### Usage
+
+Simply run `plexctl` to launch the interactive TUI. On first run, it will guide you through authentication and server selection.
+
+```bash
+# Launch TUI
+plexctl
+
+# Search via CLI
+plexctl search find "Matrix"
+
+# Check index status
+plexctl search status
+```
+
+---
+
+Check out the [CLI Reference](/cli/plexctl) for a full list of commands.

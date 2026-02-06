@@ -1,0 +1,61 @@
+package ui
+
+import (
+	"github.com/LukeHagar/plexgo/models/components"
+	tea "github.com/charmbracelet/bubbletea"
+	tint "github.com/lrstanley/bubbletint"
+)
+
+type HelpKey struct {
+	Key  string
+	Desc string
+}
+
+type HelpProvider interface {
+	HelpKeys() []HelpKey
+}
+
+type SelectMediaMsg struct {
+	RatingKey string
+	Type      string
+	SectionID string
+}
+
+type ThemeChangedMsg struct {
+	Theme tint.Tint
+}
+
+func (m ThemeChangedMsg) GetTheme() tint.Tint {
+	return m.Theme
+}
+
+type JumpToDetailMsg struct {
+	SectionID    string
+	RatingKey    string
+	Type         string
+	ReturnTabIdx int
+}
+
+type RootChecker interface {
+	IsAtRoot() bool
+}
+
+const AnnotationSkipServerCheck = "skip_server_check"
+
+type Refreshable interface {
+	Refresh() tea.Cmd
+}
+
+type PlayableProvider interface {
+	GetSelectedMetadata() *components.Metadata
+}
+
+type RequestPlayMsg struct {
+	RatingKey string
+	TctMode   bool
+}
+
+type ResumeChoiceMsg struct {
+	Metadata *components.Metadata
+	TctMode  bool
+}
