@@ -20,6 +20,21 @@ A robust Plex CLI and TUI written in Go.
 
 Download the latest binary for your platform from the [Releases](https://github.com/ygelfand/plexctl/releases) page.
 
+### Manual Installation (macOS/Linux)
+
+If you download the binary directly, you will need to make it executable and move it to your path:
+
+```bash
+# Rename the downloaded binary (example for macOS ARM)
+mv plexctl_Darwin_arm64 plexctl
+
+# Make it executable
+chmod +x plexctl
+
+# Move to a directory in your PATH (optional)
+sudo mv plexctl /usr/local/bin/
+```
+
 Alternatively, if you have Go installed:
 
 ```bash
