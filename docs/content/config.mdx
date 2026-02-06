@@ -1,0 +1,140 @@
+# Configuration Reference
+
+`plexctl` stores its configuration in a YAML file at `~/.plexctl.yaml`. While many of these settings are managed through the TUI (pressing `s` or `l`), you can gain granular control by editing the file directly.
+
+## Full Example
+
+```yaml
+token: "your_plex_token"
+output: "table" # Default: table
+verbose: 0 # Default: 0
+theme: "nord" # Default: default
+icon_type: "nerdfonts" # Default: emoji (detected)
+library_name_format: "icon_name" # Default: icon_name
+default_view_mode: "poster" # Default: poster
+close_video_on_quit: true # Default: false
+cache_dir: "/home/user/.plexctl/cache" # Default: ~/.plexctl/cache
+default_server: "d9e8f7a6b5c4d3e2f1a0"
+servers:
+  "d9e8f7a6b5c4d3e2f1a0":
+    name: "Main Server"
+    url: "https://192-168-1-100.plex.direct:32400"
+    libraries:
+      order:
+        - "1" # Movies
+        - "4" # 4K Movies
+        - "2" # TV Shows
+        - "5" # Music
+      settings:
+        "1":
+          icon_emoji: "🎬"
+          icon_nf: "󰿎"
+          hidden: false # Default: false
+          view_mode: "poster" # Default: poster
+```
+
+---
+
+## UI Settings
+
+Options that modify the look and feel of the Terminal User Interface.
+
+### `theme`
+The color palette used by the TUI. `plexctl` includes several built-in themes.
+- **Default:** `default`
+- **Supported:** `nord`, `dracula`, `solarized-dark`, `solarized-light`, `gruvbox`, `catppuccin`.
+
+### `icon_type`
+Sets the global icon set for the application.
+- **Default:** `emoji` (Auto-detected if possible)
+- **Options:**
+    - `nerdfonts`: High-detail icons. Requires a terminal font from [Nerd Fonts](https://www.nerdfonts.com/).
+    - `emoji`: Standard color emojis. Works in most modern terminal emulators.
+    - `ascii`: Simple text-based icons (e.g., `[M]`, `[S]`). Best for maximum compatibility.
+
+### `library_name_format`
+Controls the layout of the sidebar items.
+- **Default:** `icon_name`
+- **Options:**
+    - `icon_name`: `🎬 Movies`
+    - `name_icon`: `Movies 🎬`
+    - `icon_only`: `🎬`
+    - `name`: `Movies`
+
+### `default_view_mode`
+The initial layout used when browsing a library.
+- **Default:** `poster`
+- **Options:** `poster` (grid), `list` (table).
+
+---
+
+## Playback & Cache
+
+Settings related to how media is played and how data is stored locally.
+
+### `close_video_on_quit`
+When exiting `plexctl`, determine if the `mpv` video window should also be closed.
+- **Default:** `false`
+- `true`: `plexctl` sends a quit command to `mpv` on exit.
+- `false`: `mpv` remains open and continues playing.
+
+### `cache_dir`
+The filesystem path where search indexes, metadata, and images are cached to improve performance.
+- **Default:** `~/.plexctl/cache`
+
+---
+
+## Server Management
+
+The `servers` key is a map of Plex Server configurations, indexed by their unique **ClientIdentifier**. These settings are typically **configured automatically** during the `plexctl login` or discovery process, but can be manually adjusted.
+
+### `default_server`
+Contains the ClientIdentifier of the server that `plexctl` should connect to by default when starting.
+
+### `servers.[ID].name`
+A user-defined alias for the server, used in server selection menus.
+
+### `servers.[ID].url`
+The base URL used to reach the server. For remote or secure access, this is typically the `.plex.direct` address.
+
+---
+
+## Library Overrides
+
+The `libraries` section within a server allows you to customize individual library sections.
+
+### `order`
+A list of library keys (as strings) that defines the exact order they appear in the TUI sidebar. 
+- In the example above, **Movies (1)** and **4K Movies (4)** are prioritized at the top.
+- Libraries **not** present in this list will be appended to the end in their default Plex order.
+
+### `settings.[ID].hidden`
+When `true`, the library is completely hidden from the TUI sidebar. 
+- **Default:** `false`
+
+### `settings.[ID].icon_emoji` / `icon_nf` / `icon_ascii`
+Define custom icons for a specific library. `plexctl` will automatically use the value matching your global `icon_type`. 
+
+### `settings.[ID].view_mode`
+Force a specific view mode (`list` or `poster`) for this library, overriding the global `default_view_mode`. 
+- **Default:** Inherits from `default_view_mode`.
+
+---
+
+## TUI Configuration
+
+While you can edit `~/.plexctl.yaml` manually, most common settings can be managed directly within the `plexctl` TUI using dedicated configuration overlays.
+
+### Global Settings (`s`)
+Pressing **`s`** at any time opens the Global Settings overlay. From here you can:
+- **Change Theme:** Cycle through available color palettes (Nord, Dracula, etc.) and see changes instantly.
+- **Set Icon Type:** Switch between Nerd Fonts, Emojis, and ASCII icons.
+- **Sidebar Layout:** Adjust the `library_name_format` to show or hide icons and names.
+
+### Library Management (`l`)
+Pressing **`l`** opens the Library Configuration overlay. This allows you to manage the appearance of your sidebar:
+- **Hide Libraries:** Toggle the visibility of specific libraries (e.g., hide a "Photos" or "Home Movies" section).
+- **Custom Icons:** Browse and pick icons for each specific library using an integrated icon picker (supports Emoji and Nerd Fonts).
+- **Reorder Sidebar:** Use **`K`** and **`J`** (Shift+Up/Down) to drag and drop libraries into your preferred order.
+
+Changes made in these overlays are saved immediately to your `.plexctl.yaml` file.
