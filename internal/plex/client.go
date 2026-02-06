@@ -66,7 +66,7 @@ func NewClient() (*Client, error) {
 	_, serverCfg, hasServer := cfg.GetActiveServer()
 
 	if token == "" {
-		return nil, fmt.Errorf("plex token not found. please login with 'plexctl auth login' or set PLEXCTL_TOKEN")
+		return nil, fmt.Errorf("plex token not found. please login with 'plexctl login' or set PLEXCTL_TOKEN")
 	}
 	httpClient := &http.Client{
 		Transport: &loggingTransport{
