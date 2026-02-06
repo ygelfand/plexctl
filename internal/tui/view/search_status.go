@@ -71,6 +71,10 @@ func (v *SearchStatusView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if v.isIndexing {
 			return v, nil
 		}
+		switch msg.String() {
+		case "r":
+			return v, v.Refresh()
+		}
 	case spinner.TickMsg:
 		if v.isIndexing {
 			var cmd tea.Cmd
