@@ -19,7 +19,7 @@ builds:
       - -s -w -X github.com/ygelfand/plexctl/internal/config.Version={{.Version}} -X github.com/ygelfand/plexctl/internal/config.GitCommit={{.Commit}} -X github.com/ygelfand/plexctl/internal/config.BuildDate={{.Date}}
 
 archives:
-  - format: tar.gz
+  - formats: ["tar.gz"]
     # this name template makes the escapes easier to read
     name_template: >-
       {{ .ProjectName }}_
@@ -31,17 +31,17 @@ archives:
     # use zip for windows archives
     format_overrides:
       - goos: windows
-        format: zip
+        formats: ["zip"]
 
 checksum:
-  name_template: 'checksums.txt'
+  name_template: "checksums.txt"
 
 snapshot:
-  name_template: "{{ incpatch .Version }}-next"
+  version_template: "{{ incpatch .Version }}-next"
 
 changelog:
   sort: asc
   filters:
     exclude:
-      - '^docs:'
-      - '^test:'
+      - "^docs:"
+      - "^test:"
