@@ -3,7 +3,6 @@ bin/
 plexctl
 
 # Go
-go.sum
 vendor/
 
 # Node.js
