@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LukeHagar/plexgo/models/operations"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	tint "github.com/lrstanley/bubbletint"
@@ -21,6 +22,7 @@ import (
 	"github.com/ygelfand/plexctl/internal/tui/widget/resume"
 	tuisearch "github.com/ygelfand/plexctl/internal/tui/widget/search"
 	"github.com/ygelfand/plexctl/internal/tui/widget/settings"
+	"github.com/ygelfand/plexctl/internal/tui/widget/userpicker"
 	"github.com/ygelfand/plexctl/internal/ui"
 	"go.dalton.dog/bubbleup"
 )
@@ -37,6 +39,9 @@ type Controller struct {
 	playerStatus player.PlayerStatus
 	returnTabIdx int
 }
+
+type switchUserSuccessMsg struct{}
+type reloadedDataMsg plex.LoaderResult
 
 func NewController(data plex.LoaderResult) *Controller {
 	cfg := config.Get()
@@ -81,6 +86,12 @@ func NewController(data plex.LoaderResult) *Controller {
 
 func (c *Controller) Init() tea.Cmd {
 	var cmds []tea.Cmd
+
+	cfg := config.Get()
+	if cfg.HomeUser.AccessToken == "" {
+		cmds = append(cmds, c.triggerUserSwitch())
+	}
+
 	if model := c.tabManager.ActiveModel(); model != nil {
 		cmds = append(cmds, model.Init())
 	}
@@ -142,6 +153,31 @@ func (c *Controller) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return c, nil
+
+	case ui.UserSelectionMsg:
+		return c, c.navigator.Push(userpicker.NewUserPickerOverlayModel(msg.Users, c.theme))
+
+	case ui.InvalidPinMsg:
+		if overlay := c.navigator.ActiveOverlay(); overlay != nil {
+			if picker, ok := overlay.(*userpicker.UserPickerOverlayModel); ok {
+				var cmd tea.Cmd
+				_, cmd = picker.Update(msg)
+				return c, cmd
+			}
+		}
+		return c, nil
+
+	case ui.SwitchUserMsg:
+		return c, c.handleSwitchUser(msg)
+
+	case switchUserSuccessMsg:
+		c.navigator.Pop()
+		// Return a command that triggers a full data reload
+		return c, c.fullReload()
+
+	case reloadedDataMsg:
+		c.data = plex.LoaderResult(msg)
+		return c, c.tabManager.setupTabs(c.data, c.theme, ui.SidebarWidth)
 	}
 
 	if navCmd, captured := c.navigator.Update(msg); captured {
@@ -228,6 +264,8 @@ func (c *Controller) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "/":
 			return c, c.navigator.Push(tuisearch.NewSearchOverlayModel(c.theme))
+		case "u":
+			return c, c.triggerUserSwitch()
 		case "shift+tab":
 			return c, c.tabManager.PrevTab()
 		}
@@ -297,13 +335,121 @@ func (c *Controller) handleJumpToDetail(msg ui.JumpToDetailMsg) tea.Cmd {
 	for i, tab := range c.tabManager.tabModels {
 		if libTab, ok := tab.(*view.MediaView); ok {
 			if libTab.GetSectionID() == msg.SectionID {
-				c.tabManager.SetActive(i)
+				initCmd := c.tabManager.SetActive(i)
 				c.returnTabIdx = msg.ReturnTabIdx
-				return libTab.ShowDetail(msg.RatingKey, msg.Type)
+				return tea.Batch(initCmd, libTab.ShowDetail(msg.RatingKey, msg.Type))
 			}
 		}
 	}
 	return nil
+}
+
+func (c *Controller) handleSwitchUser(msg ui.SwitchUserMsg) tea.Cmd {
+	return func() tea.Msg {
+		cfg := config.Get()
+
+		// 1. Get client using home user auth token to perform the switch
+		client, err := plex.NewHomeHomeUserClient()
+		if err != nil {
+			return err
+		}
+
+		slog.Info("TUI: Switching user", "target", msg.User.Title, "uuid", msg.User.UUID)
+
+		req := operations.SwitchUserRequest{
+			ID: msg.User.UUID,
+		}
+		if msg.Pin != "" {
+			req.RequestBody = operations.SwitchUserRequestBody{
+				Pin: &msg.Pin,
+			}
+		}
+
+		res, err := client.SDK.HomeUsers.SwitchUser(context.Background(), req)
+		if err != nil {
+			// Check for 403/Forbidden which indicates invalid PIN
+			if strings.Contains(err.Error(), "403") || strings.Contains(strings.ToLower(err.Error()), "pin is required") {
+				return ui.InvalidPinMsg{}
+			}
+			slog.Error("TUI: Switch user failed", "error", err)
+			return err
+		}
+
+		if res.UserPlexAccount == nil {
+			return fmt.Errorf("failed to switch user: no account data returned")
+		}
+
+		// 2. We got an AuthToken. Now we need to use THIS specific AuthToken to get resources
+		slog.Info("TUI: Fetching server-specific token for home user")
+		newClient, err := plex.NewClientWithToken(res.UserPlexAccount.AuthToken)
+		if err != nil {
+			return err
+		}
+
+		resources, err := newClient.SDK.Plex.GetServerResources(context.Background(), operations.GetServerResourcesRequest{
+			IncludeHTTPS: operations.IncludeHTTPSTrue.ToPointer(),
+		})
+		if err != nil {
+			slog.Error("TUI: Failed to get server resources for home user", "error", err)
+			return err
+		}
+
+		serverID, _, _ := cfg.GetActiveServer()
+		accessToken := res.UserPlexAccount.AuthToken // Fallback to auth token if server-specific one isn't found
+		for _, dev := range resources.PlexDevices {
+			if dev.ClientIdentifier == serverID && dev.AccessToken != "" {
+				slog.Info("TUI: Found server-specific token", "server", dev.Name)
+				accessToken = dev.AccessToken
+				break
+			}
+		}
+
+		// 3. Save both tokens
+		cfg.HomeUser.AuthToken = res.UserPlexAccount.AuthToken
+		cfg.HomeUser.AccessToken = accessToken
+		_ = cfg.Save()
+
+		slog.Info("TUI: User switched successfully")
+		return switchUserSuccessMsg{}
+	}
+}
+
+func (c *Controller) triggerUserSwitch() tea.Cmd {
+	return func() tea.Msg {
+		client, err := plex.NewHomeHomeUserClient()
+		if err != nil {
+			return err
+		}
+		res, err := client.SDK.HomeUsers.GetHomeUsers(context.Background())
+		if err != nil {
+			return err
+		}
+		if res.Object == nil {
+			return fmt.Errorf("no home data returned")
+		}
+		if len(res.Object.Users) <= 1 {
+			slog.Debug("TUI: 0 or 1 home user, skipping switch")
+			return nil
+		}
+		return ui.UserSelectionMsg{Users: res.Object.Users}
+	}
+}
+
+func (c *Controller) fullReload() tea.Cmd {
+	return func() tea.Msg {
+		updates := make(chan interface{}, 10)
+		go plex.LoadData(context.Background(), updates)
+
+		for {
+			msg := <-updates
+			if res, ok := msg.(plex.LoaderResult); ok {
+				return reloadedDataMsg(res)
+			}
+			if err, ok := msg.(error); ok {
+				return err
+			}
+		}
+	}
 }
 
 func (c *Controller) showHelp() tea.Cmd {
@@ -312,6 +458,7 @@ func (c *Controller) showHelp() tea.Cmd {
 		{Key: "h", Desc: "Home"},
 		{Key: "s", Desc: "Global Settings"},
 		{Key: "l", Desc: "Libraries"},
+		{Key: "u", Desc: "Switch User"},
 		{Key: "p", Desc: "Play Selected"},
 		{Key: "x", Desc: "Stop Playback"},
 		{Key: "q", Desc: "Quit"},
@@ -377,7 +524,7 @@ func (c *Controller) renderBaseView() string {
 		Background(c.theme.BrightBlack()).
 		Foreground(c.theme.White()).
 		Padding(0, 1).
-		Render(" q: quit | tab: switch lib | h: home | s: settings | l: libs | p: play | x: stop ")
+		Render(" q: quit | tab: switch lib | h: home | s: settings | l: libs | u: user | p: play | x: stop ")
 
 	return lipgloss.JoinVertical(lipgloss.Left, mainArea, footer)
 }

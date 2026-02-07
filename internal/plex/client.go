@@ -3,8 +3,10 @@ package plex
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httputil"
+	"os"
 	"runtime"
 	"time"
 
@@ -60,8 +62,34 @@ func NewClient() (*Client, error) {
 	cfg := config.Get()
 
 	// 1. Check for Token (Global)
-	token := cfg.Token
+	token := os.Getenv("PLEXCTL_TOKEN")
+	source := "env"
+	if token == "" {
+		token = cfg.Token
+		source = "main account"
+		// If a home user access token is set, it overrides the main account token
+		if cfg.HomeUser.AccessToken != "" {
+			token = cfg.HomeUser.AccessToken
+			source = "home user access"
+		}
+	}
 
+	slog.Debug("NewClient: Initializing with token", "source", source)
+	return NewClientWithToken(token)
+}
+
+// NewHomeUserClient specifically uses the V2 AuthToken (general user token)
+func NewHomeHomeUserClient() (*Client, error) {
+	cfg := config.Get()
+	token := cfg.Token
+	if cfg.HomeUser.AuthToken != "" {
+		token = cfg.HomeUser.AuthToken
+	}
+	return NewClientWithToken(token)
+}
+
+func NewClientWithToken(token string) (*Client, error) {
+	cfg := config.Get()
 	// 2. Resolve Server (if configured)
 	_, serverCfg, hasServer := cfg.GetActiveServer()
 
@@ -90,9 +118,6 @@ func NewClient() (*Client, error) {
 
 	if hasServer && serverCfg.URL != "" {
 		opts = append(opts, plexgo.WithServerURL(serverCfg.URL))
-	} else {
-		// If no server is configured, we can still return a client, but it effectively points nowhere valid for PMS commands.
-		// It IS valid for plex.tv commands (like GetServerResources) which are global.
 	}
 
 	return &Client{SDK: plexgo.New(opts...)}, nil

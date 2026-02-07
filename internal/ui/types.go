@@ -2,6 +2,7 @@ package ui
 
 import (
 	"github.com/LukeHagar/plexgo/models/components"
+	"github.com/LukeHagar/plexgo/models/operations"
 	tea "github.com/charmbracelet/bubbletea"
 	tint "github.com/lrstanley/bubbletint"
 )
@@ -34,6 +35,22 @@ type JumpToDetailMsg struct {
 	RatingKey    string
 	Type         string
 	ReturnTabIdx int
+}
+
+type UserSelectionMsg struct {
+	Users []operations.HomeUser
+}
+
+type SwitchUserMsg struct {
+	User operations.HomeUser
+	Pin  string
+}
+
+type InvalidPinMsg struct{}
+
+type MediaPageMsg struct {
+	Metadata []components.Metadata
+	Total    int
 }
 
 type RootChecker interface {

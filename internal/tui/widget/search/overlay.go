@@ -77,6 +77,10 @@ func (m *SearchOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "esc":
 			return nil, nil
+		case "up", "down":
+			var lCmd tea.Cmd
+			m.list, lCmd = m.list.Update(msg)
+			return m, lCmd
 		case "enter":
 			if m.list.SelectedItem() != nil {
 				item := m.list.SelectedItem().(searchResultItem)
@@ -92,13 +96,16 @@ func (m *SearchOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	var tiCmd tea.Cmd
+	oldValue := m.textInput.Value()
 	m.textInput, tiCmd = m.textInput.Update(msg)
 	cmds = append(cmds, tiCmd)
 
-	if m.textInput.Value() != "" {
-		m.runSearch()
-	} else {
-		m.list.SetItems(nil)
+	if m.textInput.Value() != oldValue {
+		if m.textInput.Value() != "" {
+			m.runSearch()
+		} else {
+			m.list.SetItems(nil)
+		}
 	}
 
 	var lCmd tea.Cmd

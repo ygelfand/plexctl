@@ -92,10 +92,16 @@ type Server struct {
 	Libraries LibraryConfig `mapstructure:"libraries" yaml:"libraries"`
 }
 
+type HomeUser struct {
+	AuthToken   string `mapstructure:"auth_token" yaml:"auth_token"`     // V2 Switch User Token
+	AccessToken string `mapstructure:"access_token" yaml:"access_token"` // Server-specific Access Token
+}
+
 // Config holds the global configuration for plexctl
 type Config struct {
 	// Global settings
 	Token             string            `mapstructure:"token"`
+	HomeUser          HomeUser          `mapstructure:"home_user"`
 	OutputFormat      string            `mapstructure:"output"`
 	Verbosity         int               `mapstructure:"verbose"`
 	Theme             string            `mapstructure:"theme"`
@@ -195,6 +201,7 @@ func (c *Config) Enabled(level slog.Level) bool {
 func (c *Config) Save() error {
 	// Sync struct fields to viper before writing
 	viper.Set("token", c.Token)
+	viper.Set("home_user", c.HomeUser)
 	viper.Set("output", c.OutputFormat)
 	viper.Set("verbose", c.Verbosity)
 	viper.Set("theme", c.Theme)

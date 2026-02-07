@@ -48,11 +48,6 @@ type MediaView struct {
 	details detail.DetailManager
 }
 
-type mediaPageMsg struct {
-	metadata []components.Metadata
-	total    int
-}
-
 func NewMediaView(sectionID, title string, theme tint.Tint) *MediaView {
 	columns := []table.Column{
 		{Title: "TITLE", Width: 50},
@@ -114,7 +109,7 @@ func (v *MediaView) Refresh() tea.Cmd {
 
 func (v *MediaView) fetchPage(start int) tea.Cmd {
 	return func() tea.Msg {
-		slog.Debug("MediaView fetching page", "section", v.sectionID, "start", start)
+		slog.Debug("MediaView: fetchPage started", "section", v.sectionID, "start", start)
 		client, err := plex.NewClient()
 		if err != nil {
 			return err
@@ -158,9 +153,9 @@ func (v *MediaView) fetchPage(start int) tea.Cmd {
 			total = len(body.MediaContainer.Metadata)
 		}
 
-		slog.Debug("MediaView fetched items", "count", len(body.MediaContainer.Metadata), "total", total)
+		slog.Debug("MediaView: fetchPage finished", "section", v.sectionID, "count", len(body.MediaContainer.Metadata), "total", total)
 
-		return mediaPageMsg{metadata: body.MediaContainer.Metadata, total: total}
+		return ui.MediaPageMsg{Metadata: body.MediaContainer.Metadata, Total: total}
 	}
 }
 
@@ -195,10 +190,10 @@ func (v *MediaView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		v.theme = msg.Theme
 		v.posterGrid.Theme = v.theme
 		ui.UpdateTableTheme(&v.table, ui.GetLayout().MainAreaContentWidth(), ui.GetLayout().TotalHeight())
-	case mediaPageMsg:
+	case ui.MediaPageMsg:
 		v.isLoading = false
-		v.totalItems = msg.total
-		v.allMetadata = append(v.allMetadata, msg.metadata...)
+		v.totalItems = msg.Total
+		v.allMetadata = append(v.allMetadata, msg.Metadata...)
 		v.loadedItems = len(v.allMetadata)
 		v.syncTableRows()
 		cmds = append(cmds, v.posterGrid.SetItems(v.allMetadata))

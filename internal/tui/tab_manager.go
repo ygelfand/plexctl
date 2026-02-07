@@ -31,37 +31,14 @@ func (tm *TabManager) setupTabs(data plex.LoaderResult, theme tint.Tint, sidebar
 	cfg := config.Get()
 	_, server, _ := cfg.GetActiveServer()
 
-	// 1. Map existing models for reuse
-	oldModels := make(map[string]tea.Model)
-	for _, m := range tm.tabModels {
-		switch v := m.(type) {
-		case *view.HomeView:
-			oldModels["home"] = m
-		case *view.MediaView:
-			oldModels["media:"+v.GetSectionID()] = m
-		case *view.SessionsTab:
-			oldModels["sessions"] = m
-		case *view.HistoryTab:
-			oldModels["history"] = m
-		case *view.TasksTab:
-			oldModels["tasks"] = m
-		case *view.SearchStatusView:
-			oldModels["search_status"] = m
-		}
-	}
-
 	var newModels []tea.Model
 	var cmds []tea.Cmd
 
 	// Home
-	if m, ok := oldModels["home"]; ok {
-		newModels = append(newModels, m)
-	} else {
-		m := view.NewHomeView(theme)
-		newModels = append(newModels, m)
-		if tm.activeTabIdx == 0 {
-			cmds = append(cmds, m.Init())
-		}
+	m := view.NewHomeView(theme)
+	newModels = append(newModels, m)
+	if tm.activeTabIdx == 0 {
+		cmds = append(cmds, m.Init())
 	}
 
 	// Libraries
@@ -79,15 +56,10 @@ func (tm *TabManager) setupTabs(data plex.LoaderResult, theme tint.Tint, sidebar
 			customIcons[lib.ID] = icon
 		}
 
-		key := "media:" + lib.ID
-		if m, ok := oldModels[key]; ok {
-			newModels = append(newModels, m)
-		} else {
-			m := view.NewMediaView(lib.ID, lib.Title, theme)
-			newModels = append(newModels, m)
-			if len(newModels)-1 == tm.activeTabIdx {
-				cmds = append(cmds, m.Init())
-			}
+		m := view.NewMediaView(lib.ID, lib.Title, theme)
+		newModels = append(newModels, m)
+		if len(newModels)-1 == tm.activeTabIdx {
+			cmds = append(cmds, m.Init())
 		}
 	}
 
@@ -105,22 +77,18 @@ func (tm *TabManager) setupTabs(data plex.LoaderResult, theme tint.Tint, sidebar
 	}
 
 	for _, st := range []string{"sessions", "history", "tasks"} {
-		if m, ok := oldModels[st]; ok {
-			newModels = append(newModels, m)
-		} else {
-			var m tea.Model
-			switch st {
-			case "sessions":
-				m = view.NewSessionsTab(theme)
-			case "history":
-				m = view.NewHistoryTab(theme)
-			case "tasks":
-				m = view.NewTasksTab(theme)
-			}
-			newModels = append(newModels, m)
-			if len(newModels)-1 == tm.activeTabIdx {
-				cmds = append(cmds, m.Init())
-			}
+		var m tea.Model
+		switch st {
+		case "sessions":
+			m = view.NewSessionsTab(theme)
+		case "history":
+			m = view.NewHistoryTab(theme)
+		case "tasks":
+			m = view.NewTasksTab(theme)
+		}
+		newModels = append(newModels, m)
+		if len(newModels)-1 == tm.activeTabIdx {
+			cmds = append(cmds, m.Init())
 		}
 	}
 
@@ -129,14 +97,10 @@ func (tm *TabManager) setupTabs(data plex.LoaderResult, theme tint.Tint, sidebar
 	searchItems := []navbar.NavItem{
 		{ID: "search_status", Title: "Status", Type: "search_status"},
 	}
-	if m, ok := oldModels["search_status"]; ok {
-		newModels = append(newModels, m)
-	} else {
-		m := view.NewSearchStatusView(theme, data.Libraries)
-		newModels = append(newModels, m)
-		if len(newModels)-1 == tm.activeTabIdx {
-			cmds = append(cmds, m.Init())
-		}
+	sm := view.NewSearchStatusView(theme, data.Libraries)
+	newModels = append(newModels, sm)
+	if len(newModels)-1 == tm.activeTabIdx {
+		cmds = append(cmds, sm.Init())
 	}
 
 	sections := []navbar.NavSection{
@@ -149,6 +113,11 @@ func (tm *TabManager) setupTabs(data plex.LoaderResult, theme tint.Tint, sidebar
 	tm.navbar = navbar.NewNavbar(sections, theme)
 	tm.navbar.SetCustomIcons(customIcons)
 	tm.navbar.Width = sidebarWidth
+
+	// Reset index if out of bounds (due to changing library count)
+	if tm.activeTabIdx >= len(tm.tabModels) {
+		tm.activeTabIdx = 0
+	}
 	tm.navbar.SetActive(tm.activeTabIdx)
 
 	// Propagate dimensions

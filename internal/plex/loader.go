@@ -143,6 +143,7 @@ func LoadData(ctx context.Context, updates chan<- interface{}) {
 	}
 
 	slog.Info("Loader: Initialization complete", "libraries", len(libraries))
+
 	sendUpdate(1.0, "Initialization complete!")
 	updates <- LoaderResult{
 		ServerID:  serverID,

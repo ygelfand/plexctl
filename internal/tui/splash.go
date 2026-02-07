@@ -1,25 +1,23 @@
 package tui
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"fmt"
-	"image"
-	_ "image/png"
 	"log/slog"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/blacktop/go-termimg"
 	"github.com/ygelfand/plexctl/internal/config"
 	"github.com/ygelfand/plexctl/internal/plex"
 	"golang.org/x/term"
 )
 
-//go:embed splash.png
-var splashImgData []byte
+//go:embed splash.ans
+var splashArt string
+
+const artWidth = 68 // Static width of the art in splash.ans
 
 // ShowStandaloneSplash renders the splash screen and performs background initialization
 func ShowStandaloneSplash(minDuration time.Duration, resultChan chan<- plex.LoaderResult) {
@@ -30,56 +28,37 @@ func ShowStandaloneSplash(minDuration time.Duration, resultChan chan<- plex.Load
 		return
 	}
 
-	// 1. Prepare Image
-	slog.Debug("Splash: Decoding image")
-	imgObj, _, err := image.Decode(bytes.NewReader(splashImgData))
-	if err != nil {
-		slog.Error("Splash: Failed to decode image", "error", err)
-		return
-	}
-	bounds := imgObj.Bounds()
-	imgAR := float64(bounds.Dx()) / float64(bounds.Dy())
-
-	img, err := termimg.From(bytes.NewReader(splashImgData))
-	if err != nil {
-		slog.Error("Splash: Failed to create termimg", "error", err)
-		return
-	}
-
-	targetHeight := int(float64(height) * 0.5)
-	if targetHeight < 5 {
-		targetHeight = 5
-	}
-	targetWidth := int(float64(targetHeight) * imgAR * 2.0)
-
-	if targetWidth > int(float64(width)*0.8) {
-		targetWidth = int(float64(width) * 0.8)
-		targetHeight = int(float64(targetWidth) / (imgAR * 2.0))
-	}
-
-	slog.Debug("Splash: Rendering image", "width", targetWidth, "height", targetHeight)
-	rendered, err := img.
-		Width(targetWidth).
-		Height(targetHeight).
-		Scale(termimg.ScaleFit).
-		Render()
-
-	if err != nil {
-		slog.Error("Splash: Failed to render image", "error", err)
-		return
-	}
-
-	x := (width - targetWidth) / 2
-	y := (height - targetHeight) / 2
-
-	// 2. Start Worker
+	// 1. Prepare Worker
 	slog.Debug("Splash: Starting data loader")
 	updates := make(chan interface{}, 10)
 	go plex.LoadData(context.Background(), updates)
 
-	// 3. Render Loop
-	fmt.Print("\033[H\033[2J") // Initial Clear
-	fmt.Printf("\033[%d;%dH%s", y, x, rendered)
+	// 2. Render Initial Splash
+	fmt.Print("\033[H\033[2J") // Clear screen
+
+	lines := strings.Split(splashArt, "\n")
+	artHeight := len(lines)
+	startY := (height - artHeight) / 2
+	if startY < 1 {
+		startY = 1
+	}
+
+	// Calculate horizontal centering
+	startX := (width - artWidth) / 2
+	if startX < 1 {
+		startX = 1
+	}
+	padding := strings.Repeat(" ", startX)
+
+	// Print line by line with calculated left padding
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "" && !strings.Contains(line, "\033") {
+			// Handle truly empty lines (spacing)
+			fmt.Printf("\033[%d;1H", startY+i)
+			continue
+		}
+		fmt.Printf("\033[%d;1H%s%s", startY+i, padding, line)
+	}
 
 	startTime := time.Now()
 	ticker := time.NewTicker(50 * time.Millisecond)

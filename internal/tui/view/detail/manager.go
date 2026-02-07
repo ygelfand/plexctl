@@ -41,6 +41,12 @@ func (m *DetailManager) Update(msg tea.Msg) (tea.Cmd, bool) {
 
 	var cmd tea.Cmd
 	m.View, cmd = m.View.Update(msg)
+
+	// Everything is handled by the detail view EXCEPT library data messages.
+	if _, ok := msg.(ui.MediaPageMsg); ok {
+		return cmd, false
+	}
+
 	return cmd, true
 }
 
