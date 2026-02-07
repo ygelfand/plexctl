@@ -99,6 +99,15 @@ func (v *SeasonDetailView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "esc", "backspace":
 			return v, func() tea.Msg { return BackMsg{} }
+		case "S":
+			if v.Metadata != nil && v.Metadata.ParentRatingKey != nil {
+				return v, func() tea.Msg {
+					return ui.JumpToDetailMsg{
+						RatingKey: *v.Metadata.ParentRatingKey,
+						Type:      "show",
+					}
+				}
+			}
 		}
 	}
 
@@ -120,6 +129,7 @@ func (v *SeasonDetailView) HelpKeys() []ui.HelpKey {
 	}
 	return []ui.HelpKey{
 		{Key: "enter", Desc: "View Episode Details"},
+		{Key: "S", Desc: "Go to Show"},
 		{Key: "esc", Desc: "Back"},
 		{Key: "j/up", Desc: "Move Up / Scroll"},
 		{Key: "k/down", Desc: "Move Down / Scroll"},
@@ -165,5 +175,5 @@ func (v *SeasonDetailView) View() string {
 		Render(v.episodeList.View())
 
 	return lipgloss.NewStyle().Padding(1, 2).Render(lipgloss.JoinVertical(lipgloss.Left, mainLayout, listContent)) +
-		"\n\n " + lipgloss.NewStyle().Foreground(v.Theme.BrightBlack()).Render("[enter] View Details | [p] Play | [esc] Back")
+		"\n\n " + lipgloss.NewStyle().Foreground(v.Theme.BrightBlack()).Render("[enter] Details | [p] Play | [S] Show | [esc] Back")
 }

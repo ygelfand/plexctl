@@ -231,9 +231,9 @@ func (c *Controller) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return c, c.player.Stop()
 			}
 			return c, tea.Quit
-		case "s":
+		case "ctrl+s":
 			return c, c.navigator.Push(settings.NewSettingsOverlayModel(c.theme))
-		case "l":
+		case "ctrl+l":
 			return c, c.navigator.Push(tuiconfig.NewConfigOverlayModel(c.data.Libraries))
 		case "h":
 			return c, c.tabManager.SetActive(0)
@@ -332,15 +332,29 @@ func (c *Controller) handleSelectMedia(msg ui.SelectMediaMsg) tea.Cmd {
 }
 
 func (c *Controller) handleJumpToDetail(msg ui.JumpToDetailMsg) tea.Cmd {
-	for i, tab := range c.tabManager.tabModels {
-		if libTab, ok := tab.(*view.MediaView); ok {
-			if libTab.GetSectionID() == msg.SectionID {
-				initCmd := c.tabManager.SetActive(i)
-				c.returnTabIdx = msg.ReturnTabIdx
-				return tea.Batch(initCmd, libTab.ShowDetail(msg.RatingKey, msg.Type))
+	slog.Debug("Controller: handleJumpToDetail", "key", msg.RatingKey, "type", msg.Type, "section", msg.SectionID)
+
+	// 1. If SectionID is specified, find that specific tab
+	if msg.SectionID != "" {
+		for i, tab := range c.tabManager.tabModels {
+			if libTab, ok := tab.(*view.MediaView); ok {
+				if libTab.GetSectionID() == msg.SectionID {
+					slog.Debug("Controller: Found matching library tab", "idx", i)
+					initCmd := c.tabManager.SetActive(i)
+					c.returnTabIdx = msg.ReturnTabIdx
+					return tea.Batch(initCmd, libTab.ShowDetail(msg.RatingKey, msg.Type))
+				}
 			}
 		}
 	}
+
+	// 2. Fallback: If no section specified OR not found, try the active tab
+	if activeTab, ok := c.tabManager.ActiveModel().(*view.MediaView); ok {
+		slog.Debug("Controller: Applying jump to active library tab")
+		return activeTab.ShowDetail(msg.RatingKey, msg.Type)
+	}
+
+	slog.Warn("Controller: No matching library tab found for jump", "section", msg.SectionID)
 	return nil
 }
 
@@ -456,8 +470,8 @@ func (c *Controller) showHelp() tea.Cmd {
 	keys := []ui.HelpKey{
 		{Key: "tab", Desc: "Switch Library"},
 		{Key: "h", Desc: "Home"},
-		{Key: "s", Desc: "Global Settings"},
-		{Key: "l", Desc: "Libraries"},
+		{Key: "ctrl+s", Desc: "Global Settings"},
+		{Key: "ctrl+l", Desc: "Libraries"},
 		{Key: "u", Desc: "Switch User"},
 		{Key: "p", Desc: "Play Selected"},
 		{Key: "x", Desc: "Stop Playback"},
@@ -524,7 +538,7 @@ func (c *Controller) renderBaseView() string {
 		Background(c.theme.BrightBlack()).
 		Foreground(c.theme.White()).
 		Padding(0, 1).
-		Render(" q: quit | tab: switch lib | h: home | s: settings | l: libs | u: user | p: play | x: stop ")
+		Render(" q: quit | tab: switch lib | h: home | ctrl+s: settings | ctrl+l: libs | u: user | p: play | x: stop ")
 
 	return lipgloss.JoinVertical(lipgloss.Left, mainArea, footer)
 }

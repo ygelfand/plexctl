@@ -60,6 +60,24 @@ func (v *EpisodeDetailView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "esc", "backspace":
 			return v, func() tea.Msg { return BackMsg{} }
+		case "s":
+			if v.Metadata != nil && v.Metadata.ParentRatingKey != nil {
+				return v, func() tea.Msg {
+					return ui.JumpToDetailMsg{
+						RatingKey: *v.Metadata.ParentRatingKey,
+						Type:      "season",
+					}
+				}
+			}
+		case "S":
+			if v.Metadata != nil && v.Metadata.GrandparentRatingKey != nil {
+				return v, func() tea.Msg {
+					return ui.JumpToDetailMsg{
+						RatingKey: *v.Metadata.GrandparentRatingKey,
+						Type:      "show",
+					}
+				}
+			}
 		}
 	}
 
@@ -72,6 +90,8 @@ func (v *EpisodeDetailView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (v *EpisodeDetailView) HelpKeys() []ui.HelpKey {
 	return []ui.HelpKey{
 		{Key: "esc", Desc: "Back"},
+		{Key: "s", Desc: "Go to Season"},
+		{Key: "S", Desc: "Go to Show"},
 		{Key: "j/up", Desc: "Scroll Synopsis Up"},
 		{Key: "k/down", Desc: "Scroll Synopsis Down"},
 	}
@@ -121,5 +141,5 @@ func (v *EpisodeDetailView) View() string {
 	mainLayout := v.RenderPosterAndInfo(infoSection)
 
 	return lipgloss.NewStyle().Padding(1, 2).Render(mainLayout) +
-		"\n\n " + dimStyle.Render("[p] Play | [esc] Back | [↑/↓] Scroll Synopsis")
+		"\n\n " + dimStyle.Render("[p] Play | [s] Season | [S] Show | [esc] Back | [↑/↓] Scroll Synopsis")
 }

@@ -26,7 +26,6 @@ func (m *DetailManager) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, false
 	}
 
-	// Handle Back navigation globally for detail views
 	if _, ok := msg.(BackMsg); ok {
 		if rc, ok := m.View.(ui.RootChecker); !ok || rc.IsAtRoot() {
 			m.View = nil
@@ -42,8 +41,10 @@ func (m *DetailManager) Update(msg tea.Msg) (tea.Cmd, bool) {
 	var cmd tea.Cmd
 	m.View, cmd = m.View.Update(msg)
 
-	// Everything is handled by the detail view EXCEPT library data messages.
 	if _, ok := msg.(ui.MediaPageMsg); ok {
+		return cmd, false
+	}
+	if _, ok := msg.(ui.JumpToDetailMsg); ok {
 		return cmd, false
 	}
 
