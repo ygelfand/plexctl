@@ -149,7 +149,9 @@ func (v *MovieDetailView) View() string {
 	if v.Metadata.Year != nil {
 		headerParts = append(headerParts, fmt.Sprintf("%d", *v.Metadata.Year))
 	}
-	headerParts = append(headerParts, formatDuration(v.Metadata.Duration))
+	if v.Metadata.Duration != nil {
+		headerParts = append(headerParts, ui.FormatDuration(*v.Metadata.Duration))
+	}
 	if v.Metadata.ContentRating != nil {
 		headerParts = append(headerParts, *v.Metadata.ContentRating)
 	}

@@ -18,7 +18,7 @@ func (p *LibraryListPresenter) Title() string {
 }
 
 func (p *LibraryListPresenter) Headers() []string {
-	return []string{"ID", "TITLE", "TYPE", "AGENT"}
+	return []string{"ID", "TITLE", "TYPE", "AGENT", "LANGUAGE", "SCANNER", "LOCATION"}
 }
 
 func (p *LibraryListPresenter) Rows() [][]string {
@@ -36,7 +36,24 @@ func (p *LibraryListPresenter) Rows() [][]string {
 		if dir.Agent != nil {
 			agent = *dir.Agent
 		}
-		rows = append(rows, []string{id, title, string(dir.Type), agent})
+		language := dir.Language
+		scanner := ""
+		if dir.Scanner != nil {
+			scanner = *dir.Scanner
+		}
+
+		location := ""
+		if len(dir.Location) > 0 {
+			var paths []string
+			for _, loc := range dir.Location {
+				if path, ok := loc.Path.(string); ok {
+					paths = append(paths, path)
+				}
+			}
+			location = strings.Join(paths, ", ")
+		}
+
+		rows = append(rows, []string{id, title, string(dir.Type), agent, language, scanner, location})
 	}
 	return rows
 }
@@ -46,7 +63,7 @@ func (p *LibraryListPresenter) Raw() interface{} {
 }
 
 func (p *LibraryListPresenter) SortableColumns() []string {
-	return []string{"id", "title", "type"}
+	return []string{"id", "title", "type", "language"}
 }
 
 func (p *LibraryListPresenter) SortBy(column string) bool {
@@ -80,6 +97,10 @@ func (p *LibraryListPresenter) SortBy(column string) bool {
 		sort.Slice(p.Directories, func(i, j int) bool {
 			return string(p.Directories[i].Type) < string(p.Directories[j].Type)
 		})
+	case "language":
+		sort.Slice(p.Directories, func(i, j int) bool {
+			return p.Directories[i].Language < p.Directories[j].Language
+		})
 	default:
 		return false
 	}
@@ -93,71 +114,45 @@ func (p *LibraryListPresenter) DefaultSort() string {
 // LibraryItemsPresenter formats items within a library
 type LibraryItemsPresenter struct {
 	SectionID string
-	Metadata  []components.Metadata
+	Items     []GenericMetadata
+	RawData   interface{}
 }
 
 func (p *LibraryItemsPresenter) Title() string {
-	return fmt.Sprintf("Items in Library %s", p.SectionID)
+	return fmt.Sprintf("Items in %s", p.SectionID)
 }
 
 func (p *LibraryItemsPresenter) Headers() []string {
-	return []string{"ID", "TITLE", "TYPE", "YEAR"}
+	return []string{"ID", "WATCHED", "TITLE", "TYPE", "YEAR", "DURATION", "RATING", "CONTENT", "GENRE"}
 }
 
 func (p *LibraryItemsPresenter) Rows() [][]string {
 	var rows [][]string
-	for _, meta := range p.Metadata {
-		id := ""
-		if meta.RatingKey != nil {
-			id = *meta.RatingKey
-		}
-		year := ""
-		if meta.Year != nil {
-			year = fmt.Sprintf("%d", *meta.Year)
-		}
-		rows = append(rows, []string{id, meta.Title, meta.Type, year})
+	for _, item := range p.Items {
+		row := append([]string{item.ID}, item.ToRow()...)
+		rows = append(rows, row)
 	}
 	return rows
 }
 
 func (p *LibraryItemsPresenter) Raw() interface{} {
-	return p.Metadata
+	return p.RawData
 }
 
 func (p *LibraryItemsPresenter) SortableColumns() []string {
-	return []string{"id", "title", "year"}
+	return []string{"id", "title", "year", "type"}
 }
 
 func (p *LibraryItemsPresenter) SortBy(column string) bool {
 	switch strings.ToLower(column) {
 	case "id":
-		sort.Slice(p.Metadata, func(i, j int) bool {
-			idI := ""
-			if p.Metadata[i].RatingKey != nil {
-				idI = *p.Metadata[i].RatingKey
-			}
-			idJ := ""
-			if p.Metadata[j].RatingKey != nil {
-				idJ = *p.Metadata[j].RatingKey
-			}
-			return idI < idJ
-		})
+		sort.Slice(p.Items, func(i, j int) bool { return p.Items[i].ID < p.Items[j].ID })
 	case "title":
-		sort.Slice(p.Metadata, func(i, j int) bool {
-			return p.Metadata[i].Title < p.Metadata[j].Title
-		})
+		sort.Slice(p.Items, func(i, j int) bool { return p.Items[i].Title < p.Items[j].Title })
 	case "year":
-		sort.Slice(p.Metadata, func(i, j int) bool {
-			yI := 0
-			if p.Metadata[i].Year != nil {
-				yI = *p.Metadata[i].Year
-			}
-			yJ := 0
-			if p.Metadata[j].Year != nil {
-				yJ = *p.Metadata[j].Year
-			}
-			return yI < yJ
-		})
+		sort.Slice(p.Items, func(i, j int) bool { return p.Items[i].Year < p.Items[j].Year })
+	case "type":
+		sort.Slice(p.Items, func(i, j int) bool { return p.Items[i].Type < p.Items[j].Type })
 	default:
 		return false
 	}

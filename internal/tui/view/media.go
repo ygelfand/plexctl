@@ -14,6 +14,7 @@ import (
 	"github.com/ygelfand/plexctl/internal/cache"
 	"github.com/ygelfand/plexctl/internal/config"
 	"github.com/ygelfand/plexctl/internal/plex"
+	"github.com/ygelfand/plexctl/internal/presenters"
 	"github.com/ygelfand/plexctl/internal/tui/view/detail"
 	"github.com/ygelfand/plexctl/internal/tui/widget/poster"
 	"github.com/ygelfand/plexctl/internal/ui"
@@ -44,10 +45,14 @@ type MediaView struct {
 
 func NewMediaView(sectionID, title string, theme tint.Tint) *MediaView {
 	columns := []table.Column{
-		{Title: "TITLE", Width: 50},
-		{Title: "TYPE", Width: 15},
-		{Title: "YEAR", Width: 10},
-		{Title: "WATCHED", Width: 15},
+		{Title: "W", Width: 3},
+		{Title: "TITLE", Width: 45},
+		{Title: "TYPE", Width: 10},
+		{Title: "YEAR", Width: 6},
+		{Title: "DURATION", Width: 10},
+		{Title: "R", Width: 5},
+		{Title: "CONTENT", Width: 10},
+		{Title: "GENRE", Width: 15},
 	}
 
 	t := ui.NewTable(columns, theme)
@@ -335,18 +340,10 @@ func (v *MediaView) View() string {
 }
 
 func (v *MediaView) syncTableRows() {
-	rows := make([]table.Row, len(v.allMetadata))
-	for i, meta := range v.allMetadata {
-		year := ""
-		if meta.Year != nil {
-			year = fmt.Sprintf("%d", *meta.Year)
-		}
-		rows[i] = table.Row{
-			meta.Title,
-			meta.Type,
-			year,
-			detail.RenderWatchedStatus(&meta),
-		}
+	items := presenters.MapMetadata(v.allMetadata)
+	rows := make([]table.Row, len(items))
+	for i, item := range items {
+		rows[i] = item.ToRow()
 	}
 	v.table.SetRows(rows)
 }

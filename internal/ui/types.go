@@ -76,3 +76,21 @@ type ResumeChoiceMsg struct {
 	Metadata *components.Metadata
 	TctMode  bool
 }
+
+func Ptr[T any](v T) *T {
+	return &v
+}
+
+func PtrToBool(p *bool) bool {
+	if p == nil {
+		return false
+	}
+	return *p
+}
+
+func PtrToString(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}

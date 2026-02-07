@@ -97,4 +97,4 @@ require (
 
 tool github.com/doordash-oss/oapi-codegen-dd/v3/cmd/oapi-codegen
 
-replace github.com/LukeHagar/plexgo => github.com/ygelfand/plexgo v0.0.0-20260207060806-2b4a0f7e83a9
+replace github.com/LukeHagar/plexgo => github.com/ygelfand/plexgo v0.0.0-20260207224048-5f601ef124fc

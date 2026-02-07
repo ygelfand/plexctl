@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	tint "github.com/lrstanley/bubbletint"
 	"github.com/ygelfand/plexctl/internal/plex"
+	"github.com/ygelfand/plexctl/internal/presenters"
 	"github.com/ygelfand/plexctl/internal/ui"
 )
 
@@ -28,7 +29,7 @@ func NewHistoryTab(theme tint.Tint) *HistoryTab {
 	columns := []table.Column{
 		{Title: "DATE", Width: 18},
 		{Title: "USER", Width: 12},
-		{Title: "TITLE", Width: 35},
+		{Title: "TITLE", Width: 50},
 		{Title: "TYPE", Width: 8},
 		{Title: "DEVICE", Width: 12},
 		{Title: "LIBRARY", Width: 12},
@@ -141,35 +142,28 @@ func (t *HistoryTab) fetchNextPage() tea.Msg {
 		t.dayCursor = gte
 
 		if err == nil && res.Object != nil && res.Object.MediaContainer != nil {
+			userMap := make(map[int64]string)
+			libMap := make(map[string]string)
+			deviceMap := make(map[string]string)
+
+			// Pre-resolve metadata for the presenter
 			for _, meta := range res.Object.MediaContainer.Metadata {
-				viewedAt := ""
-				if meta.ViewedAt != nil {
-					viewedAt = time.Unix(*meta.ViewedAt, 0).Format("2006-01-02 15:04")
+				if meta.AccountID != nil {
+					userMap[*meta.AccountID], _ = store.ResolveUser(ctx, *meta.AccountID)
 				}
-
-				user, _ := store.ResolveUser(ctx, *meta.AccountID)
-				device, _ := store.ResolveDevice(ctx, fmt.Sprintf("%d", *meta.DeviceID))
-				library, _ := store.ResolveLibrary(ctx, *meta.LibrarySectionID)
-
-				title := ""
-				if meta.Title != nil {
-					title = *meta.Title
+				if meta.DeviceID != nil {
+					dID := fmt.Sprintf("%d", *meta.DeviceID)
+					deviceMap[dID], _ = store.ResolveDevice(ctx, dID)
 				}
-
-				mType := ""
-				if meta.Type != nil {
-					mType = *meta.Type
+				if meta.LibrarySectionID != nil {
+					libMap[*meta.LibrarySectionID], _ = store.ResolveLibrary(ctx, *meta.LibrarySectionID)
 				}
+			}
 
-				allRows = append(allRows, table.Row{
-					viewedAt,
-					user,
-					title,
-					mType,
-					device,
-					library,
-				})
-				allMeta = append(allMeta, meta)
+			items := presenters.MapHistoryMetadata(res.Object.MediaContainer.Metadata, userMap, libMap, deviceMap)
+			for i, item := range items {
+				allRows = append(allRows, item.ToRow())
+				allMeta = append(allMeta, res.Object.MediaContainer.Metadata[i])
 			}
 		}
 

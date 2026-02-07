@@ -241,7 +241,3 @@ func RenderSummary(title string, items []struct{ Label, Value string }) {
 	}
 	fmt.Println(b.String())
 }
-
-func Ptr[T any](v T) *T {
-	return &v
-}

@@ -164,8 +164,8 @@ github.com/subosito/gotenv v1.6.0 h1:9NlTDc1FTs4qu0DDq7AEtTPNw6SVm7uBMsUCUjABIf8
 github.com/subosito/gotenv v1.6.0/go.mod h1:Dk4QP5c2W3ibzajGcXpNraDfq2IrhjMIvMSWPKKo0FU=
 github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e h1:JVG44RsyaB9T2KIHavMF/ppJZNG9ZpyihvCd0w101no=
 github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e/go.mod h1:RbqR21r5mrJuqunuUZ/Dhy/avygyECGrLceyNeo4LiM=
-github.com/ygelfand/plexgo v0.0.0-20260207060806-2b4a0f7e83a9 h1:UnSpkOKbvkSnbygQYdipYjTLqV68m0BCtxkITWlEA6s=
-github.com/ygelfand/plexgo v0.0.0-20260207060806-2b4a0f7e83a9/go.mod h1:kxd/ulciB3OeABsxL2CYV0MsCEMi9etm8gX2c/thgn0=
+github.com/ygelfand/plexgo v0.0.0-20260207224048-5f601ef124fc h1:VLxyGaxackN73ntjSRIGqbzC1YRO9osPAxn8L0g87bQ=
+github.com/ygelfand/plexgo v0.0.0-20260207224048-5f601ef124fc/go.mod h1:kxd/ulciB3OeABsxL2CYV0MsCEMi9etm8gX2c/thgn0=
 go.dalton.dog/bubbleup v1.3.0 h1:lATT5LcyumQIYsLmLnj6/snFLUqojUV16A5BWRcmGzw=
 go.dalton.dog/bubbleup v1.3.0/go.mod h1:o2nq4/Eh7ypetHnzakUTmnoSgVIsPkQbetKwP4spi+8=
 go.yaml.in/yaml/v3 v3.0.4 h1:tfq32ie2Jv2UxXFdLJdh3jXuOzWiL1fo0bu/FbuKpbc=

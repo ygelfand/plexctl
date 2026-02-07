@@ -551,7 +551,7 @@ func (c *Controller) renderPlayer() string {
 	bar := lipgloss.NewStyle().Foreground(accent).Render(strings.Repeat("█", max(filled, 0))) +
 		lipgloss.NewStyle().Foreground(c.theme.BrightBlack()).Render(strings.Repeat("░", max(empty, 0)))
 
-	timeStr := fmt.Sprintf("%s / %s", formatDuration(c.playerStatus.Time), formatDuration(c.playerStatus.Duration))
+	timeStr := fmt.Sprintf("%s / %s", ui.FormatDuration(int(c.playerStatus.Time*1000)), ui.FormatDuration(int(c.playerStatus.Duration*1000)))
 	title := lipgloss.NewStyle().Foreground(c.theme.BrightYellow()).Bold(true).Width(width - 2).Render(c.playerStatus.Title)
 
 	playerStyle := lipgloss.NewStyle().Border(lipgloss.RoundedBorder(), true).BorderForeground(accent).Width(width).Padding(0, 1)
@@ -563,14 +563,4 @@ func (c *Controller) renderPlayer() string {
 	)
 
 	return playerStyle.Render(lipgloss.JoinVertical(lipgloss.Left, title, row2))
-}
-
-func formatDuration(seconds float64) string {
-	h := int(seconds) / 3600
-	m := (int(seconds) % 3600) / 60
-	s := int(seconds) % 60
-	if h > 0 {
-		return fmt.Sprintf("%02d:%02d:%02d", h, m, s)
-	}
-	return fmt.Sprintf("%02d:%02d", m, s)
 }

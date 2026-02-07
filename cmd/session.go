@@ -2,10 +2,7 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"log/slog"
 
 	"github.com/LukeHagar/plexgo/models/operations"
 	"github.com/spf13/cobra"
@@ -21,283 +18,221 @@ var sessionCmd = &cobra.Command{
 	GroupID: "media",
 }
 
-type sessionInfo struct {
-	ID     string `json:"id"`
-	User   string `json:"user"`
-	Player string `json:"player"`
-	Title  string `json:"title"`
-	State  string `json:"state"`
-}
-
-type sessionResponse struct {
-	MediaContainer struct {
-		Metadata []struct {
-			Title string `json:"title"`
-			User  struct {
-				Title string `json:"title"`
-			} `json:"User"`
-			Player struct {
-				Title string `json:"title"`
-				State string `json:"state"`
-			} `json:"Player"`
-			Session struct {
-				ID string `json:"id"`
-			} `json:"Session"`
-		} `json:"Metadata"`
-	} `json:"MediaContainer"`
-}
-
 var sessionListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all active playback sessions",
 	RunE: commands.RunWithServer(func(ctx context.Context, client *plex.Client, cmd *cobra.Command, args []string, opts *commands.PlexCtlOptions) error {
-		slog.Debug("SDK: Fetching sessions")
 		res, err := client.SDK.Status.ListSessions(ctx)
 		if err != nil {
-			slog.Error("SDK: Failed to list sessions", "error", err)
 			return err
 		}
 
-		defer res.RawResponse.Body.Close()
-		body, err := io.ReadAll(res.RawResponse.Body)
-		if err != nil {
-			slog.Error("SDK: Failed to read sessions response", "error", err)
-			return err
-		}
-
-		var sRes sessionResponse
-		if err := json.Unmarshal(body, &sRes); err != nil {
-			slog.Error("SDK: Failed to parse sessions JSON", "error", err)
-			return err
-		}
-
-		var sessions []sessionInfo
-		for _, m := range sRes.MediaContainer.Metadata {
-			sessions = append(sessions, sessionInfo{
-				ID:     m.Session.ID,
-				User:   m.User.Title,
-				Player: m.Player.Title,
-				Title:  m.Title,
-				State:  m.Player.State,
-			})
-		}
-
-		if len(sessions) == 0 {
-			slog.Debug("SDK: No active sessions found")
+		if res.Object == nil || res.Object.MediaContainer == nil || len(res.Object.MediaContainer.Metadata) == 0 {
 			fmt.Println("No active sessions.")
 			return nil
 		}
 
-		slog.Debug("SDK: Found sessions", "count", len(sessions))
+		var sessions []presenters.SessionMetadata
+		for _, m := range res.Object.MediaContainer.Metadata {
+			user := "Unknown"
+			if m.User != nil {
+				user = ui.PtrToString(m.User.Title)
+			}
+			player := "Unknown"
+			state := "Unknown"
+			if m.Player != nil {
+				player = ui.PtrToString(m.Player.Title)
+				state = ui.PtrToString(m.Player.State)
+			}
+			id := ""
+			if m.Session != nil {
+				id = ui.PtrToString(m.Session.ID)
+			}
 
-		// Use OutputData for consistent formatting
-		headers := []string{"ID", "USER", "PLAYER", "TITLE", "STATE"}
-		var rows [][]string
-		for _, s := range sessions {
-			rows = append(rows, []string{s.ID, s.User, s.Player, s.Title, s.State})
+			sessions = append(sessions, presenters.SessionMetadata{
+				ID:     id,
+				User:   user,
+				Player: player,
+				Title:  m.Title,
+				State:  state,
+			})
 		}
 
-		return commands.Print(presenters.SimplePresenter{
-			T: "Active Sessions",
-
-			H: headers,
-
-			R: rows,
-
-			RawData: sessions,
+		return commands.Print(&presenters.SessionsPresenter{
+			Sessions: sessions,
+			RawData:  res.Object.MediaContainer.Metadata,
 		}, opts)
 	}),
 }
 
 var sessionShowCmd = &cobra.Command{
-	Use: "show [session_id]",
-
+	Use:   "show [session_id]",
 	Short: "Show detailed information for a playback session",
-
-	Args: cobra.MaximumNArgs(1),
-
+	Args:  cobra.MaximumNArgs(1),
 	RunE: commands.RunWithServer(func(ctx context.Context, client *plex.Client, cmd *cobra.Command, args []string, opts *commands.PlexCtlOptions) error {
-		slog.Debug("SDK: Fetching sessions for show")
 		res, err := client.SDK.Status.ListSessions(ctx)
 		if err != nil {
-			slog.Error("SDK: Failed to list sessions for show", "error", err)
 			return err
 		}
 
-		defer res.RawResponse.Body.Close()
-
-		body, err := io.ReadAll(res.RawResponse.Body)
-		if err != nil {
-			slog.Error("SDK: Failed to read sessions response for show", "error", err)
-			return err
-		}
-
-		var sRes sessionResponse
-
-		if err := json.Unmarshal(body, &sRes); err != nil {
-			slog.Error("SDK: Failed to parse sessions JSON for show", "error", err)
-			return err
+		if res.Object == nil || res.Object.MediaContainer == nil || len(res.Object.MediaContainer.Metadata) == 0 {
+			fmt.Println("No active sessions.")
+			return nil
 		}
 
 		var sessionID string
-
 		if len(args) > 0 {
 			sessionID = args[0]
 		} else {
-
-			// Interactive selection
-
 			var options []struct{ Title, Desc, Value string }
+			for _, m := range res.Object.MediaContainer.Metadata {
+				user := "Unknown"
+				if m.User != nil {
+					user = ui.PtrToString(m.User.Title)
+				}
+				player := "Unknown"
+				state := "Unknown"
+				if m.Player != nil {
+					player = ui.PtrToString(m.Player.Title)
+					state = ui.PtrToString(m.Player.State)
+				}
+				id := ""
+				if m.Session != nil {
+					id = ui.PtrToString(m.Session.ID)
+				}
 
-			for _, m := range sRes.MediaContainer.Metadata {
 				options = append(options, struct{ Title, Desc, Value string }{
 					Title: m.Title,
-
-					Desc: fmt.Sprintf("User: %s | Player: %s (%s)", m.User.Title, m.Player.Title, m.Player.State),
-
-					Value: m.Session.ID,
+					Desc:  fmt.Sprintf("User: %s | Player: %s (%s)", user, player, state),
+					Value: id,
 				})
-			}
-
-			if len(options) == 0 {
-				slog.Debug("SDK: No active sessions found for interactive selection")
-				fmt.Println("No active sessions.")
-
-				return nil
-
 			}
 
 			sessionID, err = ui.SelectOption("Select a session to show", options)
 			if err != nil {
 				return err
 			}
-
 		}
 
-		// Find the session
+		for _, m := range res.Object.MediaContainer.Metadata {
 
-		for _, m := range sRes.MediaContainer.Metadata {
-			if m.Session.ID == sessionID {
-				slog.Debug("SDK: Found session to show", "session_id", sessionID)
+			id := ""
 
-				// We can reuse the metadata presenter or simple summary
+			if m.Session != nil {
+				id = ui.PtrToString(m.Session.ID)
+			}
+
+			if id == sessionID {
+
+				user := "Unknown"
+
+				if m.User != nil {
+					user = ui.PtrToString(m.User.Title)
+				}
+
+				player := "Unknown"
+
+				state := "Unknown"
+
+				if m.Player != nil {
+
+					player = ui.PtrToString(m.Player.Title)
+
+					state = ui.PtrToString(m.Player.State)
+
+				}
 
 				ui.RenderSummary(fmt.Sprintf("Session %s", sessionID), []struct{ Label, Value string }{
+
 					{"Title", m.Title},
 
-					{"User", m.User.Title},
+					{"User", user},
 
-					{"Player", m.Player.Title},
+					{"Player", player},
 
-					{"State", m.Player.State},
+					{"State", state},
 				})
 
 				return nil
 
 			}
+
 		}
 
-		slog.Warn("SDK: Session not found", "session_id", sessionID)
 		return fmt.Errorf("session %s not found", sessionID)
 	}),
 }
 
 var sessionStopCmd = &cobra.Command{
-	Use: "stop [session_id]",
-
+	Use:   "stop [session_id]",
 	Short: "Terminate an active playback session",
-
-	Args: cobra.MaximumNArgs(1),
-
+	Args:  cobra.MaximumNArgs(1),
 	RunE: commands.RunWithServer(func(ctx context.Context, client *plex.Client, cmd *cobra.Command, args []string, opts *commands.PlexCtlOptions) error {
-		slog.Debug("SDK: Fetching sessions for termination check")
 		res, err := client.SDK.Status.ListSessions(ctx)
 		if err != nil {
-			slog.Error("SDK: Failed to list sessions for termination", "error", err)
-			return err
-		}
-
-		defer res.RawResponse.Body.Close()
-
-		body, err := io.ReadAll(res.RawResponse.Body)
-		if err != nil {
-			slog.Error("SDK: Failed to read sessions response for termination", "error", err)
-			return err
-		}
-
-		var sRes sessionResponse
-
-		if err := json.Unmarshal(body, &sRes); err != nil {
-			slog.Error("SDK: Failed to parse sessions JSON for termination", "error", err)
 			return err
 		}
 
 		var sessionID string
-
 		if len(args) > 0 {
 			sessionID = args[0]
 		} else {
-
-			// Interactive selection
-
-			var options []struct{ Title, Desc, Value string }
-
-			for _, m := range sRes.MediaContainer.Metadata {
-				options = append(options, struct{ Title, Desc, Value string }{
-					Title: m.Title,
-
-					Desc: fmt.Sprintf("User: %s | Player: %s (%s)", m.User.Title, m.Player.Title, m.Player.State),
-
-					Value: m.Session.ID,
-				})
+			if res.Object == nil || res.Object.MediaContainer == nil || len(res.Object.MediaContainer.Metadata) == 0 {
+				fmt.Println("No active sessions to stop.")
+				return nil
 			}
 
-			if len(options) == 0 {
-				slog.Debug("SDK: No active sessions found for termination")
-				fmt.Println("No active sessions.")
+			var options []struct{ Title, Desc, Value string }
+			for _, m := range res.Object.MediaContainer.Metadata {
+				user := "Unknown"
+				if m.User != nil {
+					user = ui.PtrToString(m.User.Title)
+				}
+				player := "Unknown"
+				state := "Unknown"
+				if m.Player != nil {
+					player = ui.PtrToString(m.Player.Title)
+					state = ui.PtrToString(m.Player.State)
+				}
+				id := ""
+				if m.Session != nil {
+					id = ui.PtrToString(m.Session.ID)
+				}
 
-				return nil
-
+				options = append(options, struct{ Title, Desc, Value string }{
+					Title: m.Title,
+					Desc:  fmt.Sprintf("User: %s | Player: %s (%s)", user, player, state),
+					Value: id,
+				})
 			}
 
 			sessionID, err = ui.SelectOption("Select a session to terminate", options)
 			if err != nil {
 				return err
 			}
-
 		}
 
 		reason := "Terminated via plexctl"
-		slog.Debug("SDK: Terminating session", "session_id", sessionID)
-
 		tRes, err := client.SDK.Status.TerminateSession(ctx, operations.TerminateSessionRequest{
 			SessionID: sessionID,
-
-			Reason: &reason,
+			Reason:    &reason,
 		})
 		if err != nil {
-			slog.Error("SDK: Terminate session failed", "session_id", sessionID, "error", err)
 			return err
 		}
 
 		if tRes.StatusCode != 200 {
-			slog.Error("SDK: Terminate session returned error status", "session_id", sessionID, "status", tRes.StatusCode)
 			return fmt.Errorf("failed to terminate session: %d", tRes.StatusCode)
 		}
 
-		slog.Debug("SDK: Session terminated successfully", "session_id", sessionID)
 		fmt.Printf("Session %s terminated.\n", sessionID)
-
 		return nil
 	}),
 }
 
 func init() {
 	rootCmd.AddCommand(sessionCmd)
-
 	sessionCmd.AddCommand(sessionListCmd)
-
 	sessionCmd.AddCommand(sessionShowCmd)
-
 	sessionCmd.AddCommand(sessionStopCmd)
 }

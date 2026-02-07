@@ -104,19 +104,6 @@ func fetchPoster(metadata *components.Metadata, width int) tea.Cmd {
 	}
 }
 
-func formatDuration(ms *int) string {
-	if ms == nil {
-		return ""
-	}
-	d := *ms / 1000
-	h := d / 3600
-	m := (d % 3600) / 60
-	if h > 0 {
-		return fmt.Sprintf("%dh %dm", h, m)
-	}
-	return fmt.Sprintf("%dm", m)
-}
-
 func renderBadges(metadata *components.Metadata, theme tint.Tint) string {
 	badgeStyle := lipgloss.NewStyle().
 		Background(ui.Accent(theme)).

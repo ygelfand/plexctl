@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"sync"
 
 	tint "github.com/lrstanley/bubbletint"
@@ -131,14 +132,6 @@ func (l *LayoutManager) PosterColumns() int {
 	return cols
 }
 
-// PtrToString safely returns the value of a string pointer or empty string
-func PtrToString(p *string) string {
-	if p == nil {
-		return ""
-	}
-	return *p
-}
-
 // DetailRightColumnWidth returns the width for the info section in detail views
 func (l *LayoutManager) DetailRightColumnWidth(hasPoster bool) int {
 	// Detail views add an extra Padding(1, 2) in their View() = 4 chars overhead
@@ -149,4 +142,16 @@ func (l *LayoutManager) DetailRightColumnWidth(hasPoster bool) int {
 		return max(usable-posterFootprint, 0)
 	}
 	return usable
+}
+
+// FormatDuration converts milliseconds to a human-readable H:MM:SS or M:SS string
+func FormatDuration(ms int) string {
+	seconds := ms / 1000
+	minutes := seconds / 60
+	hours := minutes / 60
+
+	if hours > 0 {
+		return fmt.Sprintf("%d:%02d:%02d", hours, minutes%60, seconds%60)
+	}
+	return fmt.Sprintf("%d:%02d", minutes, seconds%60)
 }

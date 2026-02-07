@@ -26,26 +26,13 @@ var usersListCmd = &cobra.Command{
 			return err
 		}
 
-		if res.Object == nil || res.Object.MediaContainer == nil {
+		if res.Object == nil || res.Object.MediaContainer == nil || len(res.Object.MediaContainer.User) == 0 {
+			fmt.Println("No users found.")
 			return nil
 		}
 
-		headers := []string{"ID", "USERNAME", "EMAIL", "TITLE"}
-		var rows [][]string
-		for _, u := range res.Object.MediaContainer.User {
-			rows = append(rows, []string{
-				fmt.Sprintf("%d", u.ID),
-				u.Username,
-				u.Email,
-				u.Title,
-			})
-		}
-
-		return commands.Print(presenters.SimplePresenter{
-			T:       "Plex Users",
-			H:       headers,
-			R:       rows,
-			RawData: res.Object.MediaContainer.User,
+		return commands.Print(&presenters.UsersPresenter{
+			Users: res.Object.MediaContainer.User,
 		}, opts)
 	}),
 }

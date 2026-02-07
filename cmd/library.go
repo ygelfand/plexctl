@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 
 	"github.com/LukeHagar/plexgo/models/operations"
 	"github.com/spf13/cobra"
 	"github.com/ygelfand/plexctl/internal/commands"
 	"github.com/ygelfand/plexctl/internal/plex"
 	"github.com/ygelfand/plexctl/internal/presenters"
+	"github.com/ygelfand/plexctl/internal/ui"
 )
 
 var libraryCmd = &cobra.Command{
@@ -43,32 +45,57 @@ var libraryListCmd = &cobra.Command{
 }
 
 var libraryShowCmd = &cobra.Command{
-	Use:   "show [section_id]",
-	Short: "Show items in a library section",
+	Use:   "show [library_id]",
+	Short: "Show items in a library",
 	Args:  cobra.ExactArgs(1),
 	RunE: commands.RunWithServer(func(ctx context.Context, client *plex.Client, cmd *cobra.Command, args []string, opts *commands.PlexCtlOptions) error {
-		sectionID := args[0]
-		slog.Debug("SDK: Fetching library content", "section_id", sectionID)
+		libraryID := args[0]
+		slog.Debug("SDK: Fetching library content", "library_id", libraryID)
 
 		res, err := client.SDK.Content.ListContent(ctx, operations.ListContentRequest{
-			SectionID: sectionID,
+			SectionID: libraryID,
 		})
 		if err != nil {
-			slog.Error("SDK: Failed to get library items", "section_id", sectionID, "error", err)
+			slog.Error("SDK: Failed to get library items", "library_id", libraryID, "error", err)
 			return fmt.Errorf("failed to get library items: %w", err)
 		}
 
 		if res.MediaContainerWithMetadata == nil || res.MediaContainerWithMetadata.MediaContainer == nil || len(res.MediaContainerWithMetadata.MediaContainer.Metadata) == 0 {
-			slog.Debug("SDK: No items found", "section_id", sectionID)
+			slog.Debug("SDK: No items found", "library_id", libraryID)
 			fmt.Println("No items found in this library.")
 			return nil
 		}
 
-		slog.Debug("SDK: Found items", "section_id", sectionID, "count", len(res.MediaContainerWithMetadata.MediaContainer.Metadata))
+		slog.Debug("SDK: Found items", "library_id", libraryID, "count", len(res.MediaContainerWithMetadata.MediaContainer.Metadata))
 		return commands.Print(&presenters.LibraryItemsPresenter{
-			SectionID: sectionID,
-			Metadata:  res.MediaContainerWithMetadata.MediaContainer.Metadata,
+			SectionID: libraryID,
+			Items:     presenters.MapMetadata(res.MediaContainerWithMetadata.MediaContainer.Metadata),
+			RawData:   res.MediaContainerWithMetadata.MediaContainer.Metadata,
 		}, opts)
+	}),
+}
+
+var libraryRefreshCmd = &cobra.Command{
+	Use:   "refresh [library_id]",
+	Short: "Trigger a metadata refresh for a library",
+	Args:  cobra.ExactArgs(1),
+	RunE: commands.RunWithServer(func(ctx context.Context, client *plex.Client, cmd *cobra.Command, args []string, opts *commands.PlexCtlOptions) error {
+		libraryID, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid library ID: %w", err)
+		}
+
+		res, err := client.SDK.Library.RefreshSection(ctx, operations.RefreshSectionRequest{
+			SectionID: libraryID,
+		})
+		if err != nil {
+			return err
+		}
+
+		if res.StatusCode == 200 {
+			ui.RenderSuccess(fmt.Sprintf("Refresh triggered for library %d", libraryID))
+		}
+		return nil
 	}),
 }
 
@@ -76,4 +103,5 @@ func init() {
 	rootCmd.AddCommand(libraryCmd)
 	libraryCmd.AddCommand(libraryListCmd)
 	libraryCmd.AddCommand(libraryShowCmd)
+	libraryCmd.AddCommand(libraryRefreshCmd)
 }
