@@ -26,7 +26,7 @@ If you download the binary directly, you will need to make it executable and mov
 
 ```bash
 # Rename the downloaded binary (example for macOS ARM)
-mv plexctl_Darwin_arm64 plexctl
+mv plexctl_darwin_arm64 plexctl
 
 # Make it executable
 chmod +x plexctl
@@ -48,18 +48,34 @@ go install github.com/ygelfand/plexctl@latest
 - **Cross-Platform**: Supports macOS, Linux, and Windows.
 - **Flexible Output**: CLI commands support table, JSON, YAML, and CSV formats.
 
-## Configuration
+## Usage
 
-`plexctl` will guide you through the login and server discovery process on first run.
+### TUI (Interactive)
+Simply run `plexctl` to launch the interactive terminal interface.
+
+### CLI (Command Line)
+`plexctl` provides a comprehensive command-line interface for automation and quick tasks. Every command supports the `-h` or `--help` flag for detailed usage instructions.
 
 ```bash
-# Start the TUI
-plexctl
+# Explore available commands
+plexctl -h
 
-# Or use the CLI
-plexctl login
+# List all libraries on your server
+plexctl library list
+
+# Perform a fuzzy search
 plexctl search find "Inception"
+
+# Manage active playback sessions
+plexctl session list
+
+# Start or stop background server tasks
+plexctl tasks list
 ```
+
+All CLI commands support the `-o` or `--output` flag to return data in `table`, `json`, `json-pretty`, `yaml`, `csv`, or `txt` formats.
+
+## Configuration
 
 ## License
 
