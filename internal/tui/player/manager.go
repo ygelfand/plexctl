@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/LukeHagar/plexgo/models/operations"
@@ -260,6 +261,17 @@ func (pm *PlayerManager) ensureMpv() error {
 
 func (pm *PlayerManager) socketExists() bool {
 	if runtime.GOOS == "windows" {
+		_, err := os.OpenFile(pm.socketPath, os.O_RDWR, 0)
+		if err != nil {
+			if pe, ok := err.(*os.PathError); ok {
+				if errno, ok := pe.Err.(syscall.Errno); ok {
+					if errno == 2 {
+						return false
+					}
+				}
+			}
+			return true
+		}
 		return true // Named pipes are harder to stat, let dialing handle it
 	}
 	_, err := os.Stat(pm.socketPath)
