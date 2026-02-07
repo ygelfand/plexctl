@@ -73,6 +73,7 @@ func (m *SettingsOverlayModel) updateItems() {
 		settingItem{id: "icon_type", title: "Icon Mode", description: "Icon set for navigation", current: string(cfg.IconType)},
 		settingItem{id: "name_format", title: "Name Format", description: "How libraries are named", current: string(cfg.LibraryNameFormat)},
 		settingItem{id: "default_view_mode", title: "Default View Mode", description: "Initial view for libraries", current: string(cfg.DefaultViewMode)},
+		settingItem{id: "default_to_tui", title: "Default to TUI", description: "Start TUI if no command given", current: fmt.Sprintf("%v", cfg.DefaultToTui)},
 		settingItem{id: "cache", title: "Enable Cache", description: "Cache Plex data locally", current: fmt.Sprintf("%v", !cfg.NoCache)},
 		settingItem{id: "auto_home_login", title: "Auto Home Login", description: "Login automatically if token exists", current: fmt.Sprintf("%v", cfg.AutoHomeLogin)},
 		settingItem{id: "close_video_on_quit", title: "Close Video On Quit", description: "Close mpv when exiting app", current: fmt.Sprintf("%v", cfg.CloseVideoOnQuit)},
@@ -129,25 +130,7 @@ func (m *SettingsOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return nil, func() tea.Msg { return SettingsFinishedMsg{Config: config.Get()} }
 		case "enter":
 			if item, ok := m.list.SelectedItem().(settingItem); ok {
-				if item.id == "cache" {
-					cfg := config.Get()
-					cfg.NoCache = !cfg.NoCache
-					_ = cfg.Save()
-					m.updateItems()
-					return m, nil
-				}
-				if item.id == "auto_home_login" {
-					cfg := config.Get()
-					cfg.AutoHomeLogin = !cfg.AutoHomeLogin
-					_ = cfg.Save()
-					m.updateItems()
-					return m, nil
-				}
-				if item.id == "close_video_on_quit" {
-					cfg := config.Get()
-					cfg.CloseVideoOnQuit = !cfg.CloseVideoOnQuit
-					_ = cfg.Save()
-					m.updateItems()
+				if m.handleToggle(item.id) {
 					return m, nil
 				}
 				m.prepareSelection(item.id)
@@ -158,6 +141,31 @@ func (m *SettingsOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	m.list, cmd = m.list.Update(msg)
 	return m, cmd
+}
+
+func (m *SettingsOverlayModel) handleToggle(id string) bool {
+	cfg := config.Get()
+	handled := true
+
+	switch id {
+	case "cache":
+		cfg.NoCache = !cfg.NoCache
+	case "auto_home_login":
+		cfg.AutoHomeLogin = !cfg.AutoHomeLogin
+	case "default_to_tui":
+		cfg.DefaultToTui = !cfg.DefaultToTui
+	case "close_video_on_quit":
+		cfg.CloseVideoOnQuit = !cfg.CloseVideoOnQuit
+	default:
+		handled = false
+	}
+
+	if handled {
+		_ = cfg.Save()
+		m.updateItems()
+	}
+
+	return handled
 }
 
 func (m *SettingsOverlayModel) prepareSelection(id string) {

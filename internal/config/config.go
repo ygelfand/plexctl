@@ -210,6 +210,7 @@ func (c *Config) Save() error {
 	viper.Set("icon_type", c.IconType)
 	viper.Set("library_name_format", c.LibraryNameFormat)
 	viper.Set("default_view_mode", c.DefaultViewMode)
+	viper.Set("default_to_tui", c.DefaultToTui)
 	viper.Set("auto_home_login", c.AutoHomeLogin)
 	viper.Set("close_video_on_quit", c.CloseVideoOnQuit)
 	viper.Set("cache_dir", c.CacheDir)
