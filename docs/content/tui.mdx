@@ -13,6 +13,7 @@ The plexctl Interactive Interface (TUI) provides a rich, full-screen experience 
 
 ## Global Shortcuts
 
+- **`u`**: Switch User (Plex Home).
 - **`p`**: Play selected item.
 - **`ctrl+p`**: Play selected item in TCT mode (terminal-based video rendering).
 - **`/`**: Open global fuzzy search.
@@ -21,6 +22,7 @@ The plexctl Interactive Interface (TUI) provides a rich, full-screen experience 
 - **`r`**: Refresh current view / trigger reindex (on search page).
 - **`x`**: Stop current playback.
 - **`h`**: Jump directly to Home tab.
+- **`u`**: Switch User (Plex Home).
 - **`?`**: Show help overlay.
 
 ## Features
@@ -40,3 +42,9 @@ When playback is started, a playback bar appears at the bottom showing:
 - Play/Pause status.
 - Media title.
 You can control the player directly from the TUI using `space` to pause/resume and `x` to stop.
+
+### User Switching (Plex Home)
+Pressing `u` opens the "Who's watching?" profile picker. This allows you to switch between managed users in your Plex Home.
+- **PIN Protected Profiles**: If a user has a PIN, you will be prompted to enter it. PINs are 4 digits and are masked for security.
+- **Token Persistence**: Once a user is selected and authenticated, `plexctl` stores the resulting access token in your configuration for subsequent launches.
+- **Startup Picker**: If multiple home users are detected and no active user is set, `plexctl` will automatically show the profile picker on startup.
