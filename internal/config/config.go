@@ -111,6 +111,7 @@ type Config struct {
 	CacheDir          string            `mapstructure:"cache_dir"`
 	NoCache           bool              `mapstructure:"no_cache"`
 	DefaultToTui      bool              `mapstructure:"default_to_tui"`
+	AutoHomeLogin     bool              `mapstructure:"auto_home_login"`
 	CloseVideoOnQuit  bool              `mapstructure:"close_video_on_quit"`
 
 	// Server management
@@ -145,6 +146,7 @@ func Get() *Config {
 			Servers:         make(map[string]Server),
 			CacheDir:        filepath.Join(home, ".plexctl", "cache"),
 			DefaultToTui:    true,
+			AutoHomeLogin:   true,
 			DefaultViewMode: ViewModePoster,
 		}
 	})
@@ -208,6 +210,7 @@ func (c *Config) Save() error {
 	viper.Set("icon_type", c.IconType)
 	viper.Set("library_name_format", c.LibraryNameFormat)
 	viper.Set("default_view_mode", c.DefaultViewMode)
+	viper.Set("auto_home_login", c.AutoHomeLogin)
 	viper.Set("close_video_on_quit", c.CloseVideoOnQuit)
 	viper.Set("cache_dir", c.CacheDir)
 	viper.Set("default_server", c.DefaultServer)

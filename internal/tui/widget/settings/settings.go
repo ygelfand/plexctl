@@ -46,13 +46,13 @@ type SettingsOverlayModel struct {
 }
 
 func NewSettingsOverlayModel(theme tint.Tint) *SettingsOverlayModel {
-	l := list.New(nil, list.NewDefaultDelegate(), 60, 20)
+	l := list.New(nil, list.NewDefaultDelegate(), 68, 20)
 	l.Title = "Global Settings"
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
 	l.KeyMap.Quit.SetKeys("q")
 
-	s := list.New(nil, list.NewDefaultDelegate(), 60, 20)
+	s := list.New(nil, list.NewDefaultDelegate(), 68, 20)
 	s.SetShowStatusBar(false)
 	s.SetFilteringEnabled(false)
 
@@ -74,6 +74,7 @@ func (m *SettingsOverlayModel) updateItems() {
 		settingItem{id: "name_format", title: "Name Format", description: "How libraries are named", current: string(cfg.LibraryNameFormat)},
 		settingItem{id: "default_view_mode", title: "Default View Mode", description: "Initial view for libraries", current: string(cfg.DefaultViewMode)},
 		settingItem{id: "cache", title: "Enable Cache", description: "Cache Plex data locally", current: fmt.Sprintf("%v", !cfg.NoCache)},
+		settingItem{id: "auto_home_login", title: "Auto Home Login", description: "Login automatically if token exists", current: fmt.Sprintf("%v", cfg.AutoHomeLogin)},
 		settingItem{id: "close_video_on_quit", title: "Close Video On Quit", description: "Close mpv when exiting app", current: fmt.Sprintf("%v", cfg.CloseVideoOnQuit)},
 	}
 	m.list.SetItems(items)
@@ -90,7 +91,7 @@ func (m *SettingsOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		listW := min(m.width-10, 80)
+		listW := min(m.width-2, 88)
 		listH := min(m.height-10, 30)
 		m.list.SetSize(listW, listH)
 		m.selectionList.SetSize(listW, listH)
@@ -131,6 +132,13 @@ func (m *SettingsOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if item.id == "cache" {
 					cfg := config.Get()
 					cfg.NoCache = !cfg.NoCache
+					_ = cfg.Save()
+					m.updateItems()
+					return m, nil
+				}
+				if item.id == "auto_home_login" {
+					cfg := config.Get()
+					cfg.AutoHomeLogin = !cfg.AutoHomeLogin
 					_ = cfg.Save()
 					m.updateItems()
 					return m, nil

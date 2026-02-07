@@ -88,7 +88,7 @@ func (c *Controller) Init() tea.Cmd {
 	var cmds []tea.Cmd
 
 	cfg := config.Get()
-	if cfg.HomeUser.AccessToken == "" {
+	if cfg.HomeUser.AccessToken == "" || !cfg.AutoHomeLogin {
 		cmds = append(cmds, c.triggerUserSwitch())
 	}
 

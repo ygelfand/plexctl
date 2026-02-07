@@ -19,12 +19,6 @@ import (
 	"github.com/ygelfand/plexctl/internal/ui"
 )
 
-const (
-	columnMediaTitle = "title"
-	columnMediaType  = "type"
-	columnMediaYear  = "year"
-)
-
 type ViewMode int
 
 const (
@@ -136,7 +130,6 @@ func (v *MediaView) fetchPage(start int) tea.Cmd {
 			}
 			return res.MediaContainerWithMetadata, nil
 		})
-
 		if err != nil {
 			slog.Error("MediaView fetch error", "error", err)
 			return err

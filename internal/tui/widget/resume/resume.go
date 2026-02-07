@@ -80,7 +80,7 @@ func (m *ResumeOverlayModel) View() string {
 		MarginBottom(1)
 
 	optionStyle := lipgloss.NewStyle().PaddingLeft(2)
-	selectedStyle := optionStyle.Copy().
+	selectedStyle := optionStyle.
 		Foreground(accent).
 		Bold(true)
 

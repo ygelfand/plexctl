@@ -326,7 +326,7 @@ func (m *ConfigOverlayModel) View() string {
 	}
 
 	listStyle := lipgloss.NewStyle().Padding(1)
-	activeListStyle := listStyle.Copy().
+	activeListStyle := listStyle.
 		Border(lipgloss.NormalBorder(), false, false, false, true).
 		BorderForeground(ui.Accent(theme))
 

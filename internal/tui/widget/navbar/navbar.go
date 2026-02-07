@@ -78,7 +78,6 @@ func (n *Navbar) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (n *Navbar) View() string {
-
 	var renderedLines []string
 
 	accent := ui.Accent(n.theme)
@@ -104,7 +103,7 @@ func (n *Navbar) View() string {
 
 		Padding(0, 1)
 
-	activeStyle := baseStyle.Copy().
+	activeStyle := baseStyle.
 		Foreground(accent).
 		Bold(true).
 		Background(lipgloss.Color("234")). // Subtle background for active item

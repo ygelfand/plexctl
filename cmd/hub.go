@@ -35,7 +35,7 @@ var hubListCmd = &cobra.Command{
 		}
 
 		slog.Debug("SDK: Found hubs", "count", len(hubs))
-		headers := []string{"TITLE", "TYPE", "ID"}
+		headers := []string{"ID", "TITLE", "TYPE"}
 		var rows [][]string
 
 		for _, hub := range hubs {
@@ -54,7 +54,7 @@ var hubListCmd = &cobra.Command{
 				id = *hub.HubIdentifier
 			}
 
-			rows = append(rows, []string{title, typ, id})
+			rows = append(rows, []string{id, title, typ})
 		}
 
 		return commands.Print(presenters.SimplePresenter{

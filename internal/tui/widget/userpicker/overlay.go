@@ -64,7 +64,14 @@ func (m *UserPickerOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Only allow 4 digits
 				if len(m.pinInput) < 4 && strings.Contains("0123456789", msg.String()) {
 					m.pinInput += msg.String()
-					m.showInvalid = false // Clear error when typing
+					m.showInvalid = false
+					if len(m.pinInput) == 4 {
+						user := m.users[m.cursor]
+						pin := m.pinInput
+						return m, func() tea.Msg {
+							return ui.SwitchUserMsg{User: user, Pin: pin}
+						}
+					}
 				}
 			}
 			return m, nil
