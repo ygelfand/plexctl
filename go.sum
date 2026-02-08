@@ -88,6 +88,10 @@ github.com/kyokomi/emoji/v2 v2.2.13 h1:GhTfQa67venUUvmleTNFnb+bi7S3aocF7ZCXU9fSO
 github.com/kyokomi/emoji/v2 v2.2.13/go.mod h1:JUcn42DTdsXJo1SWanHh4HKDEyPaR5CqkmoirZZP9qE=
 github.com/leodido/go-urn v1.4.0 h1:WT9HwE9SGECu3lg4d/dIA+jxlljEa1/ffXKmRjqdmIQ=
 github.com/leodido/go-urn v1.4.0/go.mod h1:bvxc+MVxLKB4z00jd1z+Dvzr47oO32F/QSNjSBOlFxI=
+github.com/lovelydeng/gomoji v0.0.0-20221120141925-ea446dc92ac0 h1:UFF+CuOnKbYmhHij3x4kur7NVQVqWL/ocxKpBopcZKw=
+github.com/lovelydeng/gomoji v0.0.0-20221120141925-ea446dc92ac0/go.mod h1:iJlgOov0BBlkwqd0CxMUoLWn733LtoLevQ/l2H11BmM=
+github.com/lovelydeng/uniseg v0.0.0-20221120141218-19f3806b842a h1:BLRArvRRwtc4e/8oG8/fbdRnO0w8o0g4vA+rjwS92mM=
+github.com/lovelydeng/uniseg v0.0.0-20221120141218-19f3806b842a/go.mod h1:LHUI1u/1Y1MDcWiLtdN+ARgrPi/i8CdwPk4/SMvEoSE=
 github.com/lrstanley/bubbletint v1.0.0 h1:SQkt6FmXYkvXRfCU6K9MArlTeJGBerW6emX4Ko9B4Ww=
 github.com/lrstanley/bubbletint v1.0.0/go.mod h1:vGVizd1HXa1DLy4N7PAii5gwGvJhSQpvtJTR6Pr8r2o=
 github.com/lucasb-eyer/go-colorful v1.3.0 h1:2/yBRLdWBZKrf7gB40FoiKfAWYQ0lqNcbuQwVHXptag=

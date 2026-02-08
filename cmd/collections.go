@@ -40,10 +40,10 @@ var collectionListCmd = &cobra.Command{
 			return nil
 		}
 
-		return commands.Print(&presenters.LibraryItemsPresenter{
-			SectionID: fmt.Sprintf("Library %d Collections", libraryID),
-			Items:     presenters.MapMetadata(res.MediaContainerWithMetadata.MediaContainer.Metadata),
-			RawData:   res.MediaContainerWithMetadata.MediaContainer.Metadata,
+		return commands.Print(&presenters.CollectionsPresenter{
+			SectionID:   args[0],
+			Collections: res.MediaContainerWithMetadata.MediaContainer.Metadata,
+			RawData:     res.MediaContainerWithMetadata.MediaContainer.Metadata,
 		}, opts)
 	}),
 }

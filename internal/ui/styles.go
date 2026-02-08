@@ -9,6 +9,7 @@ import (
 
 	"github.com/TylerBrock/colorjson"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/lovelydeng/gomoji"
 	tint "github.com/lrstanley/bubbletint"
 	"github.com/olekukonko/tablewriter"
 	"github.com/ygelfand/plexctl/internal/config"
@@ -224,7 +225,17 @@ func (d OutputData) printTable() error {
 
 	table := tablewriter.NewWriter(os.Stdout)
 	table.Header(d.Headers)
-	table.Bulk(d.Rows)
+
+	// Sanitize rows to remove emojis that mess up alignment
+	sanitizedRows := make([][]string, len(d.Rows))
+	for i, row := range d.Rows {
+		sanitizedRows[i] = make([]string, len(row))
+		for j, val := range row {
+			sanitizedRows[i][j] = gomoji.RemoveEmojis(val)
+		}
+	}
+
+	table.Bulk(sanitizedRows)
 	return table.Render()
 }
 

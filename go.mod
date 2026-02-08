@@ -29,6 +29,8 @@ require (
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/google/btree v1.1.3 // indirect
 	github.com/hokaccha/go-prettyjson v0.0.0-20211117102719-0474bc63780f // indirect
+	github.com/lovelydeng/gomoji v0.0.0-20221120141925-ea446dc92ac0 // indirect
+	github.com/lovelydeng/uniseg v0.0.0-20221120141218-19f3806b842a // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/muesli/reflow v0.3.0 // indirect
 	github.com/olekukonko/cat v0.0.0-20250911104152-50322a0618f6 // indirect
