@@ -24,7 +24,6 @@ var rootCmd = &cobra.Command{
 	Short:         "A robust CLI for managing your Plex Media Server",
 	Version:       config.Version,
 	Long:          `plexctl is a comprehensive command-line interface for interacting with Plex Media Server`,
-	SilenceUsage:  true,
 	SilenceErrors: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Skip check if annotation is present
