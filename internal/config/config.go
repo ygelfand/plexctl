@@ -128,6 +128,7 @@ type Config struct {
 var (
 	instance *Config
 	once     sync.Once
+	IsTUI    bool
 )
 
 const (

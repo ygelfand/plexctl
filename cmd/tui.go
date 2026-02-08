@@ -25,6 +25,7 @@ var tuiCmd = &cobra.Command{
 }
 
 func runTUI() error {
+	config.IsTUI = true
 	cfg := config.Get()
 	// Always log TUI sessions to a file for easier debugging
 	cfg.LogFile = filepath.Join(cfg.CacheDir, "tui.log")

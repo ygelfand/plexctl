@@ -281,7 +281,10 @@ func (pm *PlayerManager) socketExists() bool {
 func (pm *PlayerManager) spawnMpv(tctMode bool) error {
 	args := []string{"--idle", "--no-resume-playback", fmt.Sprintf("--input-ipc-server=%s", pm.socketPath)}
 	if tctMode {
-		args = append(args, "-vo", "tct", "--really-quiet", "--vo-tct-width=100")
+		args = append(args, "-vo", "tct", "--really-quiet", "--vo-tct-buffering=frame")
+		if config.IsTUI {
+			args = append(args, "--vo-tct-height=40")
+		}
 	} else {
 		args = append(args, "--force-window=yes")
 	}
