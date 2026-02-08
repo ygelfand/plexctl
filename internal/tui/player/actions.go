@@ -66,3 +66,43 @@ func FetchAndPlay(ratingKey string, tctMode bool) tea.Cmd {
 		return nil
 	}
 }
+
+// FetchAndPlayTrailer handles finding and playing the correct trailer for a media item
+func FetchAndPlayTrailer(parentMeta *components.Metadata, tctMode bool) tea.Cmd {
+	return func() tea.Msg {
+		targetKey := ""
+		if parentMeta.PrimaryExtraKey != nil {
+			targetKey = *parentMeta.PrimaryExtraKey
+		} else if parentMeta.Extras != nil {
+			for _, extra := range parentMeta.Extras.Metadata {
+				if extra.Subtype != nil && *extra.Subtype == "trailer" {
+					if extra.RatingKey != nil {
+						targetKey = *extra.RatingKey
+						break
+					}
+				}
+			}
+		}
+
+		if targetKey == "" {
+			return fmt.Errorf("no trailer found for this item")
+		}
+
+		// Normalize key (some extra keys are full paths)
+		parts := strings.Split(targetKey, "/")
+		ratingKey := parts[len(parts)-1]
+
+		slog.Debug("FetchAndPlayTrailer: Resolved trailer key", "parent", parentMeta.Title, "target", ratingKey)
+
+		meta, err := plex.GetMetadata(context.Background(), ratingKey, false)
+		if err != nil {
+			return err
+		}
+
+		cmd := PlayMedia(meta, true, tctMode, 0)
+		if cmd != nil {
+			return cmd()
+		}
+		return nil
+	}
+}

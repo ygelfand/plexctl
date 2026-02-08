@@ -3,7 +3,6 @@ package detail
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 
 	"github.com/LukeHagar/plexgo/models/components"
@@ -76,32 +75,7 @@ func (v *MovieDetailView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (v *MovieDetailView) playTrailer() tea.Cmd {
-	return func() tea.Msg {
-		ctx := context.Background()
-		targetKey := ""
-		if v.Metadata.PrimaryExtraKey != nil {
-			targetKey = *v.Metadata.PrimaryExtraKey
-		} else if v.Metadata.Extras != nil {
-			for _, extra := range v.Metadata.Extras.Metadata {
-				if extra.Subtype != nil && *extra.Subtype == "trailer" {
-					slog.Debug("Found trailer", "extra", extra)
-					targetKey = *extra.RatingKey
-					break
-				}
-			}
-		}
-
-		if targetKey == "" {
-			return fmt.Errorf("no trailer found")
-		}
-		parts := strings.Split(targetKey, "/")
-		targetKey = parts[len(parts)-1]
-		meta, err := plex.GetMetadata(ctx, targetKey, false)
-		if err != nil {
-			return err
-		}
-		return player.PlayMedia(meta, true, false, 0)()
-	}
+	return player.FetchAndPlayTrailer(v.Metadata, false)
 }
 
 func (v *MovieDetailView) hasTrailer() bool {
