@@ -1,9 +1,9 @@
-## plexctl library show
+## plexctl playlist show
 
-Show items in a library
+Show items in a playlist
 
 ```
-plexctl library show [library_id] [flags]
+plexctl playlist show [playlist_id] [flags]
 ```
 
 ### Options
@@ -24,5 +24,5 @@ plexctl library show [library_id] [flags]
 
 ### SEE ALSO
 
-* [plexctl library](plexctl_library.md)	 - Manage libraries
+* [plexctl playlist](plexctl_playlist.md)	 - Manage playlists
 

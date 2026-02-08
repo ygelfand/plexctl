@@ -1,15 +1,15 @@
-## plexctl library show
+## plexctl collection list
 
-Show items in a library
+List collections in a library
 
 ```
-plexctl library show [library_id] [flags]
+plexctl collection list [library_id] [flags]
 ```
 
 ### Options
 
 ```
-  -h, --help   help for show
+  -h, --help   help for list
 ```
 
 ### Options inherited from parent commands
@@ -24,5 +24,5 @@ plexctl library show [library_id] [flags]
 
 ### SEE ALSO
 
-* [plexctl library](plexctl_library.md)	 - Manage libraries
+* [plexctl collection](plexctl_collection.md)	 - Manage collections
 

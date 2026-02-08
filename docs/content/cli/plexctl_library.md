@@ -22,5 +22,6 @@ Manage libraries
 
 * [plexctl](plexctl.md)	 - A robust CLI for managing your Plex Media Server
 * [plexctl library list](plexctl_library_list.md)	 - List all libraries
-* [plexctl library show](plexctl_library_show.md)	 - Show items in a library section
+* [plexctl library refresh](plexctl_library_refresh.md)	 - Trigger a metadata refresh for a library
+* [plexctl library show](plexctl_library_show.md)	 - Show items in a library
 

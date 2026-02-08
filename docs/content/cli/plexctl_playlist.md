@@ -1,15 +1,11 @@
-## plexctl library show
+## plexctl playlist
 
-Show items in a library
-
-```
-plexctl library show [library_id] [flags]
-```
+Manage playlists
 
 ### Options
 
 ```
-  -h, --help   help for show
+  -h, --help   help for playlist
 ```
 
 ### Options inherited from parent commands
@@ -24,5 +20,7 @@ plexctl library show [library_id] [flags]
 
 ### SEE ALSO
 
-* [plexctl library](plexctl_library.md)	 - Manage libraries
+* [plexctl](plexctl.md)	 - A robust CLI for managing your Plex Media Server
+* [plexctl playlist list](plexctl_playlist_list.md)	 - List all playlists
+* [plexctl playlist show](plexctl_playlist_show.md)	 - Show items in a playlist
 

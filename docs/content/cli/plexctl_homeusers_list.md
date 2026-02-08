@@ -1,15 +1,15 @@
-## plexctl library show
+## plexctl homeusers list
 
-Show items in a library
+List all users in the Plex Home
 
 ```
-plexctl library show [library_id] [flags]
+plexctl homeusers list [flags]
 ```
 
 ### Options
 
 ```
-  -h, --help   help for show
+  -h, --help   help for list
 ```
 
 ### Options inherited from parent commands
@@ -24,5 +24,5 @@ plexctl library show [library_id] [flags]
 
 ### SEE ALSO
 
-* [plexctl library](plexctl_library.md)	 - Manage libraries
+* [plexctl homeusers](plexctl_homeusers.md)	 - Manage Plex Home users
 

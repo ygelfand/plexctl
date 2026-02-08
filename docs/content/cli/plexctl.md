@@ -23,10 +23,15 @@ plexctl [flags]
 
 ### SEE ALSO
 
+* [plexctl collection](plexctl_collection.md)	 - Manage collections
+* [plexctl device](plexctl_device.md)	 - Manage account devices
 * [plexctl history](plexctl_history.md)	 - Show playback history
+* [plexctl homeusers](plexctl_homeusers.md)	 - Manage Plex Home users
 * [plexctl hub](plexctl_hub.md)	 - Manage hubs
 * [plexctl library](plexctl_library.md)	 - Manage libraries
 * [plexctl login](plexctl_login.md)	 - Login to Plex using a PIN flow
+* [plexctl play](plexctl_play.md)	 - Play a media item
+* [plexctl playlist](plexctl_playlist.md)	 - Manage playlists
 * [plexctl search](plexctl_search.md)	 - Manage and use the library search index
 * [plexctl server](plexctl_server.md)	 - Manage Plex Server
 * [plexctl session](plexctl_session.md)	 - Manage active playback sessions

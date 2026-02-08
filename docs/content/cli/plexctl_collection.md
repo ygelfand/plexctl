@@ -1,15 +1,11 @@
-## plexctl library show
+## plexctl collection
 
-Show items in a library
-
-```
-plexctl library show [library_id] [flags]
-```
+Manage collections
 
 ### Options
 
 ```
-  -h, --help   help for show
+  -h, --help   help for collection
 ```
 
 ### Options inherited from parent commands
@@ -24,5 +20,7 @@ plexctl library show [library_id] [flags]
 
 ### SEE ALSO
 
-* [plexctl library](plexctl_library.md)	 - Manage libraries
+* [plexctl](plexctl.md)	 - A robust CLI for managing your Plex Media Server
+* [plexctl collection list](plexctl_collection_list.md)	 - List collections in a library
+* [plexctl collection show](plexctl_collection_show.md)	 - Show items in a collection
 

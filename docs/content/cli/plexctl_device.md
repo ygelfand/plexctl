@@ -1,15 +1,11 @@
-## plexctl library show
+## plexctl device
 
-Show items in a library
-
-```
-plexctl library show [library_id] [flags]
-```
+Manage account devices
 
 ### Options
 
 ```
-  -h, --help   help for show
+  -h, --help   help for device
 ```
 
 ### Options inherited from parent commands
@@ -24,5 +20,7 @@ plexctl library show [library_id] [flags]
 
 ### SEE ALSO
 
-* [plexctl library](plexctl_library.md)	 - Manage libraries
+* [plexctl](plexctl.md)	 - A robust CLI for managing your Plex Media Server
+* [plexctl device list](plexctl_device_list.md)	 - List all devices associated with this account
+* [plexctl device show](plexctl_device_show.md)	 - Show detailed information for a device
 

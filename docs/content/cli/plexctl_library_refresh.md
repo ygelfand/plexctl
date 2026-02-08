@@ -1,15 +1,15 @@
-## plexctl library show
+## plexctl library refresh
 
-Show items in a library
+Trigger a metadata refresh for a library
 
 ```
-plexctl library show [library_id] [flags]
+plexctl library refresh [library_id] [flags]
 ```
 
 ### Options
 
 ```
-  -h, --help   help for show
+  -h, --help   help for refresh
 ```
 
 ### Options inherited from parent commands

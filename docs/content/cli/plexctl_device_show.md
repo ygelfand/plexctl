@@ -1,9 +1,9 @@
-## plexctl library show
+## plexctl device show
 
-Show items in a library
+Show detailed information for a device
 
 ```
-plexctl library show [library_id] [flags]
+plexctl device show [device_id] [flags]
 ```
 
 ### Options
@@ -24,5 +24,5 @@ plexctl library show [library_id] [flags]
 
 ### SEE ALSO
 
-* [plexctl library](plexctl_library.md)	 - Manage libraries
+* [plexctl device](plexctl_device.md)	 - Manage account devices
 

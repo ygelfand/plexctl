@@ -1,15 +1,17 @@
-## plexctl library show
+## plexctl play
 
-Show items in a library
+Play a media item
 
 ```
-plexctl library show [library_id] [flags]
+plexctl play [media_id] [flags]
 ```
 
 ### Options
 
 ```
-  -h, --help   help for show
+  -h, --help        help for play
+      --no-resume   Start playback from the beginning
+      --tct         Use terminal video
 ```
 
 ### Options inherited from parent commands
@@ -24,5 +26,5 @@ plexctl library show [library_id] [flags]
 
 ### SEE ALSO
 
-* [plexctl library](plexctl_library.md)	 - Manage libraries
+* [plexctl](plexctl.md)	 - A robust CLI for managing your Plex Media Server
 
