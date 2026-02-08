@@ -152,15 +152,17 @@ func Print(p presenters.Presenter, opts *PlexCtlOptions) error {
 		p.SortBy(sortCol)
 	}
 
+	title := p.Title()
+	// Suppress title for machine-readable formats
+	if opts.OutputFormat != "table" && opts.OutputFormat != "text" && opts.OutputFormat != "txt" && opts.OutputFormat != "" {
+		title = ""
+	}
+
 	data := ui.OutputData{
-
-		Title: p.Title(),
-
+		Title:   title,
 		Headers: p.Headers(),
-
-		Rows: p.Rows(),
-
-		Raw: p.Raw(),
+		Rows:    p.Rows(),
+		Raw:     p.Raw(),
 	}
 
 	return data.Print()

@@ -23,21 +23,26 @@ var searchStatusCmd = &cobra.Command{
 	Short: "Show search index status and library statistics",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		idx := search.GetIndex()
-		theme := ui.CurrentTheme()
 
-		titleStyle := ui.TitleStyle(theme)
-		labelStyle := ui.LabelStyle(theme)
-		valueStyle := ui.ValueStyle(theme)
-
-		fmt.Println(titleStyle.Render("SEARCH INDEX STATUS"))
 		lastIndexed := "Never"
 		if !idx.LastIndexed.IsZero() {
 			lastIndexed = idx.LastIndexed.Format("2006-01-02 15:04:05")
 		}
-		fmt.Printf("%s %s\n", labelStyle.Render("Last Indexed:"), valueStyle.Render(lastIndexed))
-		fmt.Printf("%s %s\n", labelStyle.Render("Total Entries:"), valueStyle.Render(fmt.Sprintf("%d", len(idx.Entries))))
 
-		return nil
+		data := map[string]interface{}{
+			"last_indexed":  lastIndexed,
+			"total_entries": len(idx.Entries),
+		}
+
+		return ui.OutputData{
+			Title:   "SEARCH INDEX STATUS",
+			Headers: []string{"PROPERTY", "VALUE"},
+			Rows: [][]string{
+				{"Last Indexed", lastIndexed},
+				{"Total Entries", fmt.Sprintf("%d", len(idx.Entries))},
+			},
+			Raw: data,
+		}.Print()
 	},
 }
 
@@ -78,7 +83,6 @@ var searchFindCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		query := strings.Join(args, " ")
 		idx := search.GetIndex()
-		theme := ui.CurrentTheme()
 
 		if len(idx.Entries) == 0 {
 			return fmt.Errorf("index is empty. Please run 'plexctl search reindex' first")
@@ -91,10 +95,9 @@ var searchFindCmd = &cobra.Command{
 			return nil
 		}
 
-		fmt.Println(ui.TitleStyle(theme).Render(fmt.Sprintf("Results for: %s", query)))
-
-		headers := []string{"TITLE", "TYPE", "LIBRARY", "KEY"}
+		headers := []string{"ID", "TITLE", "TYPE", "LIBRARY"}
 		var rows [][]string
+		var rawResults []search.IndexEntry
 
 		for i, match := range matches {
 			if i >= 20 {
@@ -102,20 +105,20 @@ var searchFindCmd = &cobra.Command{
 			}
 			e := idx.Entries[match.Index]
 			rows = append(rows, []string{
+				e.RatingKey,
 				e.Title,
 				strings.ToUpper(e.Type),
 				e.Library,
-				e.RatingKey,
 			})
+			rawResults = append(rawResults, e)
 		}
 
-		ui.OutputData{
+		return ui.OutputData{
+			Title:   fmt.Sprintf("Results for: %s", query),
 			Headers: headers,
 			Rows:    rows,
-			Raw:     rows, // Use rows as raw for now
+			Raw:     rawResults,
 		}.Print()
-
-		return nil
 	},
 }
 
