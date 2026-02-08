@@ -5,4 +5,7 @@ type PlexCtlOptions struct {
 	OutputFormat string
 	Verbosity    int
 	Sort         string
+	Count        int
+	Page         int
+	All          bool
 }

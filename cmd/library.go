@@ -14,6 +14,12 @@ import (
 	"github.com/ygelfand/plexctl/internal/ui"
 )
 
+var (
+	libraryCount int
+	libraryPage  int
+	libraryAll   bool
+)
+
 var libraryCmd = &cobra.Command{
 	Use:     "library",
 	Short:   "Manage libraries",
@@ -52,25 +58,21 @@ var libraryShowCmd = &cobra.Command{
 		libraryID := args[0]
 		slog.Debug("SDK: Fetching library content", "library_id", libraryID)
 
-		res, err := client.SDK.Content.ListContent(ctx, operations.ListContentRequest{
-			SectionID: libraryID,
-		})
+		allMetadata, err := plex.WalkContent(ctx, libraryAll, libraryPage, libraryCount, plex.LibraryWalker(client, libraryID))
 		if err != nil {
-			slog.Error("SDK: Failed to get library items", "library_id", libraryID, "error", err)
-			return fmt.Errorf("failed to get library items: %w", err)
+			return err
 		}
 
-		if res.MediaContainerWithMetadata == nil || res.MediaContainerWithMetadata.MediaContainer == nil || len(res.MediaContainerWithMetadata.MediaContainer.Metadata) == 0 {
-			slog.Debug("SDK: No items found", "library_id", libraryID)
+		if len(allMetadata) == 0 {
 			fmt.Println("No items found in this library.")
 			return nil
 		}
 
-		slog.Debug("SDK: Found items", "library_id", libraryID, "count", len(res.MediaContainerWithMetadata.MediaContainer.Metadata))
+		slog.Debug("SDK: Found items", "library_id", libraryID, "count", len(allMetadata))
 		return commands.Print(&presenters.LibraryItemsPresenter{
 			SectionID: libraryID,
-			Items:     presenters.MapMetadata(res.MediaContainerWithMetadata.MediaContainer.Metadata),
-			RawData:   res.MediaContainerWithMetadata.MediaContainer.Metadata,
+			Items:     presenters.MapMetadata(allMetadata),
+			RawData:   allMetadata,
 		}, opts)
 	}),
 }
@@ -104,4 +106,8 @@ func init() {
 	libraryCmd.AddCommand(libraryListCmd)
 	libraryCmd.AddCommand(libraryShowCmd)
 	libraryCmd.AddCommand(libraryRefreshCmd)
+
+	libraryShowCmd.Flags().IntVar(&libraryCount, "count", 50, "Number of items to return per page")
+	libraryShowCmd.Flags().IntVar(&libraryPage, "page", 1, "Page number to return")
+	libraryShowCmd.Flags().BoolVar(&libraryAll, "all", false, "Return all items (overrides count/page)")
 }

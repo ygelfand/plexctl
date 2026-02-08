@@ -17,13 +17,17 @@ import (
 // RunnerFunc defines the signature for a command handler that receives a Plex client
 type RunnerFunc func(ctx context.Context, client *plex.Client, cmd *cobra.Command, args []string, opts *PlexCtlOptions) error
 
-// RunWithClient wraps a cobra command RunE function to inject a configured Plex client
+// RunWithClient wraps a cobra command RunE function to inject a configured Plex client.
+// This is for commands that only need a token (like login or discovery).
 func RunWithClient(runner RunnerFunc) func(cmd *cobra.Command, args []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		opts := &PlexCtlOptions{
 			OutputFormat: viper.GetString("output"),
 			Verbosity:    viper.GetInt("verbose"),
 			Sort:         viper.GetString("sort"),
+			Count:        viper.GetInt("count"),
+			Page:         viper.GetInt("page"),
+			All:          viper.GetBool("all"),
 		}
 
 		client, err := plex.NewClient()
@@ -34,22 +38,10 @@ func RunWithClient(runner RunnerFunc) func(cmd *cobra.Command, args []string) er
 	}
 }
 
-// RunWithServer wraps a cobra command RunE function to inject a configured Plex client
-// and ensures that a default server has been selected.
+// RunWithServer wraps RunWithClient but ensures a default server is selected first.
+// This is for commands that interact with specific media or server library sections.
 func RunWithServer(runner RunnerFunc) func(cmd *cobra.Command, args []string) error {
-	return func(cmd *cobra.Command, args []string) error {
-		opts := &PlexCtlOptions{
-			OutputFormat: viper.GetString("output"),
-			Verbosity:    viper.GetInt("verbose"),
-			Sort:         viper.GetString("sort"),
-		}
-
-		client, err := plex.NewClient()
-		if err != nil {
-			return err
-		}
-		return runner(cmd.Context(), client, cmd, args, opts)
-	}
+	return RunWithClient(runner)
 }
 
 // EnsureActiveServer checks if a server is configured and triggers discovery if not
