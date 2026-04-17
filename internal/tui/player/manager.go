@@ -76,7 +76,7 @@ func (pm *PlayerManager) Status() PlayerStatus {
 	return pm.status
 }
 
-func (pm *PlayerManager) Play(url, title, ratingKey string, noReport bool, tctMode bool, startOffset int64) tea.Cmd {
+func (pm *PlayerManager) Play(url, title, ratingKey string, noReport bool, tctMode bool, startOffset int64, subtitles []ExternalSubtitle) tea.Cmd {
 	return func() tea.Msg {
 		slog.Debug("PlayerManager.Play start", "title", title, "rk", ratingKey, "tct", tctMode, "offset", startOffset)
 		if err := pm.ensureMpv(); err != nil {
@@ -150,6 +150,14 @@ func (pm *PlayerManager) Play(url, title, ratingKey string, noReport bool, tctMo
 		pm.conn.Call("set_property", "user-data/plex-title", title)
 		pm.conn.Call("set_property", "user-data/plex-no-report", noReport)
 		pm.conn.Call("show-text", "PlexCTL: Loading "+title+"...", 5000)
+
+		for _, sub := range subtitles {
+			if _, err := pm.conn.Call("sub-add", sub.URL, "auto", sub.Title, sub.Language); err != nil {
+				slog.Warn("Failed to add subtitle track", "title", sub.Title, "error", err)
+			} else {
+				slog.Debug("Added external subtitle", "title", sub.Title, "lang", sub.Language)
+			}
+		}
 
 		slog.Debug("PlayerManager: playback initiated")
 		pm.reportProgressWithKey()

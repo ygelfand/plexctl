@@ -30,7 +30,28 @@ func PlayMedia(metadata *components.Metadata, noReport bool, tctMode bool, start
 		separator = "&"
 	}
 	playURL := fmt.Sprintf("%s%s%sX-Plex-Token=%s", serverCfg.URL, part.Key, separator, cfg.Token)
-	slog.Debug("Playing media", "url", playURL, "tct", tctMode, "offset", startOffset)
+
+	var subtitles []ExternalSubtitle
+	for _, stream := range part.Stream {
+		if stream.StreamType == components.StreamTypeSubtitle && stream.Key != "" {
+			sep := "?"
+			if strings.Contains(stream.Key, "?") {
+				sep = "&"
+			}
+			subURL := fmt.Sprintf("%s%s%sX-Plex-Token=%s", serverCfg.URL, stream.Key, sep, cfg.Token)
+			lang := ""
+			if stream.LanguageCode != nil {
+				lang = *stream.LanguageCode
+			}
+			subtitles = append(subtitles, ExternalSubtitle{
+				URL:      subURL,
+				Title:    stream.DisplayTitle,
+				Language: lang,
+			})
+		}
+	}
+
+	slog.Debug("Playing media", "url", playURL, "tct", tctMode, "offset", startOffset, "subtitles", len(subtitles))
 	rk := ""
 	if metadata.RatingKey != nil {
 		rk = *metadata.RatingKey
@@ -41,7 +62,7 @@ func PlayMedia(metadata *components.Metadata, noReport bool, tctMode bool, start
 		title = "Trailer: " + title
 	}
 
-	return GetPlayerManager().Play(playURL, title, rk, noReport, tctMode, startOffset)
+	return GetPlayerManager().Play(playURL, title, rk, noReport, tctMode, startOffset, subtitles)
 }
 
 // FetchAndPlay handles the full playback logic: fetch full metadata, check for resume, then play
