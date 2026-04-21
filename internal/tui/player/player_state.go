@@ -13,6 +13,12 @@ type PlayerStatus struct {
 	TctMode  bool
 }
 
+type ExternalSubtitle struct {
+	URL      string
+	Title    string
+	Language string
+}
+
 type (
 	PlayerStatusMsg       struct{}
 	PlayerStatusMsgPoller struct{}
