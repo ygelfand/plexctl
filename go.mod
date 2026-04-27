@@ -10,6 +10,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/dexterlb/mpvipc v0.0.0-20241005113212-7cdefca0e933
 	github.com/kyokomi/emoji/v2 v2.2.13
+	github.com/lovelydeng/gomoji v0.0.0-20221120141925-ea446dc92ac0
 	github.com/olekukonko/tablewriter v1.1.3
 	github.com/peterbourgon/diskv v2.0.1+incompatible
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
@@ -29,7 +30,6 @@ require (
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/google/btree v1.1.3 // indirect
 	github.com/hokaccha/go-prettyjson v0.0.0-20211117102719-0474bc63780f // indirect
-	github.com/lovelydeng/gomoji v0.0.0-20221120141925-ea446dc92ac0 // indirect
 	github.com/lovelydeng/uniseg v0.0.0-20221120141218-19f3806b842a // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/muesli/reflow v0.3.0 // indirect
@@ -47,7 +47,7 @@ require (
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
-	github.com/buger/jsonparser v1.1.1 // indirect
+	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/charmbracelet/colorprofile v0.3.3 // indirect
 	github.com/charmbracelet/x/ansi v0.11.4 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.14 // indirect
