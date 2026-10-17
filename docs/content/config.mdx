@@ -1,6 +1,6 @@
 # Configuration Reference
 
-`plexctl` stores its configuration in a YAML file at `~/.plexctl.yaml`. While many of these settings are managed through the TUI (pressing `ctrl+s` or `ctrl+l`), you can gain granular control by editing the file directly.
+`plexctl` stores its configuration in a YAML file at `~/.plexctl.yaml`. While many of these settings are managed through the TUI (pressing `Ctrl+S` or `L`), you can gain granular control by editing the file directly.
 
 ## Full Example
 
@@ -16,6 +16,13 @@ icon_type: "nerdfonts" # Default: emoji (detected)
 library_name_format: "icon_name" # Default: icon_name
 default_view_mode: "poster" # Default: poster
 close_video_on_quit: true # Default: false
+terminal_video: "auto" # auto, kitty, sixel, tct
+terminal_video_mode: "suspend" # suspend or overlay (TUI only)
+sixel_video_width: 640 # Pixel cap; 0 uses the terminal size
+poster_renderer: "auto" # auto, kitty, sixel, halfcell
+music_player: "terminal" # terminal or window
+music_visualizer: "waveform" # waveform, spectrum, mirror, off
+window_music_visualizer: "cqt" # cqt, spectrum, waves, scope, off
 cache_dir: "/home/user/.plexctl/cache" # Default: ~/.plexctl/cache
 default_server: "d9e8f7a6b5c4d3e2f1a0"
 servers:
@@ -69,17 +76,114 @@ The initial layout used when browsing a library.
 - **Default:** `poster`
 - **Options:** `poster` (grid), `list` (table).
 
+### `poster_renderer`
+Selects how movie/TV posters and album covers are drawn. Covers retain their
+aspect ratio inside the available space.
+
+- **Default:** `auto`
+- **Options:** `auto`, `kitty`, `sixel`, `halfcell`.
+- **TUI:** **Ctrl+S → Poster Renderer**, applied when Settings closes.
+- **Override:** `--poster-renderer sixel` or `PLEXCTL_POSTER_RENDERER=sixel`.
+
+Automatic selection prefers Kitty Unicode placeholders in Kitty 0.28+ and
+Ghostty when the graphics probe succeeds, then Sixel when advertised, then
+colored half-cell text. Explicit selection lets you override detection.
+Kitty video support alone does not imply Unicode placeholder support.
+Native graphics also use tmux passthrough; text works without graphics support.
+
 ---
 
 ## Playback & Cache
 
 Settings related to how media is played and how data is stored locally.
 
+### `terminal_video`
+Selects the renderer used by **Ctrl+P** for terminal video playback.
+Press **v** to choose a renderer for an individual playback.
+- **Default:** `auto`
+- **Options:** `auto`, `kitty`, `sixel`, `tct`.
+- **TUI:** Change **Terminal Video** in **Ctrl+S** Settings.
+- **Override:** `--terminal-video kitty` or `PLEXCTL_TERMINAL_VIDEO=kitty`.
+
+Auto mode probes the attached terminal, checks which outputs mpv provides,
+and falls back to TCT. If an automatically chosen graphics output fails during
+startup, it retries with TCT and shows a notice. Explicit choices report the
+failure. Graphics require support in both the terminal and mpv;
+run `mpv --vo=help` to check the latter. tmux 3.3+ is supported automatically;
+unknown terminals use TCT. Plain `p` continues to open a video window. For CLI terminal
+playback, pass `plexctl play <id> --terminal-video <renderer>` explicitly.
+
+Suspended terminal playback ends on **q** or at the end of the queue and returns
+to the library, independently of `close_video_on_quit`.
+
+### `terminal_video_mode`
+Controls how terminal video shares the TUI.
+
+- **Default:** `suspend`
+- **Options:** `suspend` takes over the terminal with mpv playback controls;
+  `overlay` draws over the content pane while the sidebar and TUI player remain
+  active. Dialogs temporarily hide overlay video.
+- **TUI:** **Ctrl+S → Terminal Video Mode**.
+- **Override:** `--terminal-video-mode overlay` or `PLEXCTL_TERMINAL_VIDEO_MODE=overlay`.
+
+Overlay mode uses the TUI's **Space**, **[ / ]**, **+ / -**, **m**, and **x**
+controls. It stops on TUI exit. CLI terminal playback always uses suspend mode.
+This setting does not change terminal audio playback or a separate mpv window.
+
+### `sixel_video_width`
+Caps Sixel video width in pixels and centers the result within the playback
+area. A smaller value reduces the amount of image data sent each frame.
+
+- **Default:** `640`
+- **Values:** a positive pixel width, or `0` for mpv's automatic sizing.
+- **TUI:** **Ctrl+S → Sixel Video Width** offers 320, 480, 640, 960, 1280, or automatic.
+- **Override:** `--sixel-video-width 480` or `PLEXCTL_SIXEL_VIDEO_WIDTH=480`.
+
+The cap applies to suspend and overlay video, including music visualization.
+It does not affect posters, Kitty video, or text video.
+
+### `music_player`
+Chooses where **p** plays a track, album, or artist in the TUI.
+
+- **Default:** `terminal`
+- **Options:** `terminal` plays audio with the TUI player; `window` opens mpv.
+- **TUI:** **Ctrl+S → Music Player**, or **v** for a single selection.
+- **Environment:** `PLEXCTL_MUSIC_PLAYER`.
+
+**Ctrl+P** always selects terminal audio. Playing an album queues all its tracks;
+playing an artist queues their tracks, including compilation contributions.
+
+### `music_visualizer`
+Controls the audio-only TUI display. Playback continues while you browse.
+
+- **Default:** `waveform`
+- **Options:** `waveform`, `spectrum`, `mirror`, `off` (compact controls).
+- **TUI:** **Ctrl+S → Music Visualizer**, or **z** while music is playing.
+- **Environment:** `PLEXCTL_MUSIC_VISUALIZER`.
+
+### `window_music_visualizer`
+Creates video from music when using a separate mpv window or explicit terminal
+video, including `plexctl play <album-id> --terminal-video auto`.
+
+- **Default:** `cqt`
+- **Options:** `cqt` (frequency visualization), `spectrum` (scrolling spectrum),
+  `waves` (waveform), `scope` (stereo vectorscope), `off`.
+- **TUI:** **Ctrl+S → Music Video Visualizer**.
+- **Override:** `--window-music-visualizer waves` or `PLEXCTL_WINDOW_MUSIC_VISUALIZER=waves`.
+
+This uses mpv's FFmpeg/lavfi filters and preserves the audible audio stream.
+Choose `off` if your mpv build lacks the selected filter. The setting applies to
+the next playback request; `music_visualizer` controls the separate TUI display.
+
 ### `close_video_on_quit`
 When exiting `plexctl`, determine if the `mpv` video window should also be closed.
 - **Default:** `false`
 - `true`: `plexctl` sends a quit command to `mpv` on exit.
-- `false`: `mpv` remains open and continues playing.
+- `false`: the separate mpv window can continue playing after the TUI exits.
+
+Terminal audio and overlay video always stop when the TUI exits. CLI playback
+exits when the queue finishes; Ctrl+C stops it. Per-track Plex reporting requires
+plexctl to remain running.
 
 ### `cache_dir`
 The filesystem path where search indexes, metadata, and images are cached to improve performance.
@@ -133,9 +237,11 @@ Pressing **`ctrl+s`** at any time opens the Global Settings overlay. From here y
 - **Change Theme:** Cycle through available color palettes (Nord, Dracula, etc.) and see changes instantly.
 - **Set Icon Type:** Switch between Nerd Fonts, Emojis, and ASCII icons.
 - **Sidebar Layout:** Adjust the `library_name_format` to show or hide icons and names.
+- **Playback and Images:** Choose poster/video renderers, suspend/overlay mode,
+  Sixel width, music player, and both music visualizers.
 
-### Library Management (`ctrl+l`)
-Pressing **`ctrl+l`** opens the Library Configuration overlay. This allows you to manage the appearance of your sidebar:
+### Library Management (`L`)
+Pressing **`L`** opens the Library Configuration overlay. This allows you to manage the appearance of your sidebar:
 - **Hide Libraries:** Toggle the visibility of specific libraries (e.g., hide a "Photos" or "Home Movies" section).
 - **Custom Icons:** Browse and pick icons for each specific library using an integrated icon picker (supports Emoji and Nerd Fonts).
 - **Reorder Sidebar:** Use **`K`** and **`J`** (Shift+Up/Down) to drag and drop libraries into your preferred order.

@@ -3,9 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
-	"strings"
 
-	"github.com/LukeHagar/plexgo/models/operations"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/ygelfand/plexctl/internal/config"
@@ -20,6 +18,10 @@ type RunnerFunc func(ctx context.Context, client *plex.Client, cmd *cobra.Comman
 // RunWithClient wraps a cobra command RunE function to inject a configured Plex client.
 // This is for commands that only need a token (like login or discovery).
 func RunWithClient(runner RunnerFunc) func(cmd *cobra.Command, args []string) error {
+	return runWithClient(plex.NewAccountClient, runner)
+}
+
+func runWithClient(newClient func() (*plex.Client, error), runner RunnerFunc) func(cmd *cobra.Command, args []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		opts := &PlexCtlOptions{
 			OutputFormat: viper.GetString("output"),
@@ -30,7 +32,7 @@ func RunWithClient(runner RunnerFunc) func(cmd *cobra.Command, args []string) er
 			All:          viper.GetBool("all"),
 		}
 
-		client, err := plex.NewClient()
+		client, err := newClient()
 		if err != nil {
 			return err
 		}
@@ -41,7 +43,7 @@ func RunWithClient(runner RunnerFunc) func(cmd *cobra.Command, args []string) er
 // RunWithServer wraps RunWithClient but ensures a default server is selected first.
 // This is for commands that interact with specific media or server library sections.
 func RunWithServer(runner RunnerFunc) func(cmd *cobra.Command, args []string) error {
-	return RunWithClient(runner)
+	return runWithClient(plex.NewClient, runner)
 }
 
 // EnsureActiveServer checks if a server is configured and triggers discovery if not
@@ -60,77 +62,49 @@ func EnsureActiveServer(ctx context.Context) error {
 
 // DiscoverAndSelectServer triggers the interactive server discovery flow
 func DiscoverAndSelectServer(ctx context.Context) error {
-	client, err := plex.NewClient()
+	servers, err := plex.DiscoverServers(ctx)
 	if err != nil {
 		return err
 	}
-
-	res, err := client.SDK.Plex.GetServerResources(ctx, operations.GetServerResourcesRequest{
-		IncludeHTTPS: operations.IncludeHTTPSTrue.ToPointer(),
-		IncludeIPv6:  operations.IncludeIPv6True.ToPointer(),
-		IncludeRelay: operations.IncludeRelayTrue.ToPointer(),
-	})
-	if err != nil {
-		return fmt.Errorf("failed to discover servers: %w", err)
-	}
-
-	var options []struct{ Title, Desc, Value, ID string }
-	for _, device := range res.PlexDevices {
-		if strings.Contains(device.Provides, "server") {
-			for _, conn := range device.Connections {
-				if !conn.Relay {
-					desc := conn.URI
-					if conn.Local {
-						desc += " (Local)"
-					}
-					options = append(options, struct{ Title, Desc, Value, ID string }{
-						Title: device.Name,
-						Desc:  desc,
-						Value: conn.URI,
-						ID:    device.ClientIdentifier,
-					})
-				}
-			}
+	// Initial selection is for the user's own server. Shared servers are
+	// discovered independently under Friends Libraries in the TUI.
+	var owned []struct{ Title, Desc, Value string }
+	for _, device := range servers {
+		if device.Owned {
+			owned = append(owned, struct{ Title, Desc, Value string }{device.Name, "Owned", device.ClientIdentifier})
 		}
 	}
-
-	if len(options) == 0 {
-		return fmt.Errorf("no servers discovered on plex.tv")
+	if len(owned) == 0 {
+		return fmt.Errorf("no owned Plex servers discovered for this user")
 	}
-
-	// Adapt options for UI selector
-	var uiOptions []struct{ Title, Desc, Value string }
-	for _, o := range options {
-		uiOptions = append(uiOptions, struct{ Title, Desc, Value string }{
-			Title: o.Title,
-			Desc:  o.Desc,
-			Value: o.Value,
-		})
-	}
-
-	choice, err := ui.SelectOption("Select a Plex Server to use", uiOptions)
-	if err != nil {
-		return fmt.Errorf("failed to select server: %w", err)
-	}
-
-	// Find the selected option to get the ID and Name
-	var selectedID, selectedName string
-	for _, opt := range options {
-		if opt.Value == choice {
-			selectedID = opt.ID
-			selectedName = opt.Title
-			break
+	choice := owned[0].Value
+	if len(owned) > 1 {
+		choice, err = ui.SelectOption("Select your Plex server", owned)
+		if err != nil {
+			return err
 		}
 	}
-
-	cfg := config.Get()
-	cfg.AddServer(selectedID, config.Server{Name: selectedName, URL: choice}, true)
-	if err := cfg.Save(); err != nil {
-		return fmt.Errorf("failed to save configuration: %w", err)
+	for _, device := range servers {
+		if device.ClientIdentifier != choice {
+			continue
+		}
+		target, err := plex.ConnectServer(ctx, device)
+		if err != nil {
+			return err
+		}
+		cfg := config.Get()
+		server := cfg.Servers[target.ID]
+		server.Name, server.URL = target.Name, target.URL
+		server.AccessToken, server.TokenSource = target.Token, cfg.TokenSource()
+		server.Shared = target.Shared
+		cfg.AddServer(target.ID, server, true)
+		if err := cfg.Save(); err != nil {
+			return fmt.Errorf("save configuration: %w", err)
+		}
+		ui.RenderSuccess(fmt.Sprintf("Selected and saved server: %s", target.Name))
+		return nil
 	}
-
-	ui.RenderSuccess(fmt.Sprintf("Selected and saved server: %s (%s)", selectedName, choice))
-	return nil
+	return fmt.Errorf("selected server is no longer available")
 }
 
 // Print formats and prints data using the provided Presenter

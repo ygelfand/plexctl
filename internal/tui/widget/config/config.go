@@ -36,6 +36,8 @@ type ConfigOverlayModel struct {
 	focusSide       int // 0: Hidden, 1: Active
 	isPicking       bool
 	currentIconType config.IconType
+	listRects       [2]ui.Rect
+	actionRows      int
 }
 
 type ConfigFinishedMsg struct {
@@ -137,6 +139,13 @@ func (m *ConfigOverlayModel) Init() tea.Cmd {
 	return nil
 }
 
+func (m *ConfigOverlayModel) ActionRows() int {
+	if m.isPicking {
+		return 0 // The icon picker handles its own action bar.
+	}
+	return m.actionRows
+}
+
 func (m *ConfigOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
@@ -149,6 +158,11 @@ func (m *ConfigOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.isPicking = false
 			m.picker = nil
 			return m, nil
+		}
+		if mouse, ok := msg.(tea.MouseMsg); ok {
+			mouse.X -= 3
+			mouse.Y -= 2
+			msg = mouse
 		}
 
 		_, cmd = m.picker.Update(msg)
@@ -191,9 +205,19 @@ func (m *ConfigOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		for i, rect := range m.listRects {
+			if local, inside := rect.Local(msg); inside {
+				m.focusSide = i
+				if ui.ListMouse(&m.lists[i], local) {
+					return m.Update(ui.KeyPress("enter"))
+				}
+				return m, nil
+			}
+		}
 	case tea.WindowSizeMsg:
 		for i := range m.lists {
-			m.lists[i].SetSize(30, 15)
+			m.lists[i].SetSize(max(8, min(30, (msg.Width-12)/2)), max(5, min(15, msg.Height-10)))
 		}
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -331,22 +355,29 @@ func (m *ConfigOverlayModel) View() string {
 		BorderForeground(ui.Accent(theme))
 
 	var views []string
+	x := 3
 	for i := range m.lists {
 		lView := m.lists[i].View()
+		left := 1
 		if m.focusSide == i {
-			views = append(views, activeListStyle.Render(lView))
+			views = append(views, activeListStyle.Width(m.lists[i].Width()+2).Render(lView))
+			left++
 		} else {
-			views = append(views, listStyle.Render(lView))
+			views = append(views, listStyle.Width(m.lists[i].Width()+2).Render(lView))
 		}
+		m.listRects[i] = ui.Rect{X: x + left, Y: 4, Width: m.lists[i].Width(), Height: m.lists[i].Height()}
+		x += lipgloss.Width(views[i])
 	}
 
 	content := lipgloss.JoinHorizontal(lipgloss.Top, views...)
 
 	modeLabel := lipgloss.NewStyle().Foreground(theme.BrightBlue()).Bold(true).Render(" Mode: " + string(m.currentIconType))
+	actions := lipgloss.NewStyle().Width(lipgloss.Width(content)).Render("[tab] Switch | [enter] Icon | [h] Hide\n[m] Type | [j/k] Order | [esc] Finish")
+	m.actionRows = lipgloss.Height(actions)
 
 	return overlayStyle.Render(lipgloss.JoinVertical(lipgloss.Left,
 		modeLabel,
 		content,
-		"\n [arrows/tab] switch | [enter] icon | [m] type | [h] hide | [j/k] order | [esc] finish",
+		"\n"+actions,
 	))
 }

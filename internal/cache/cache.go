@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"reflect"
+	"sync"
 	"time"
 
 	"github.com/peterbourgon/diskv"
@@ -24,15 +26,24 @@ type Manager struct {
 	dv *diskv.Diskv
 }
 
-var globalManager *Manager
+var (
+	managersMu sync.Mutex
+	managers   = make(map[string]*Manager)
+)
 
 // Get returns the global cache manager instance initialized with the given path
 func Get(path string) (*Manager, error) {
-	if globalManager != nil {
-		return globalManager, nil
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	managersMu.Lock()
+	defer managersMu.Unlock()
+	if manager := managers[path]; manager != nil {
+		return manager, nil
 	}
 
-	if err := os.MkdirAll(path, 0o755); err != nil {
+	if err := os.MkdirAll(path, 0o700); err != nil {
 		return nil, err
 	}
 
@@ -44,10 +55,13 @@ func Get(path string) (*Manager, error) {
 		BasePath:     path,
 		Transform:    flatTransform,
 		CacheSizeMax: 1024 * 1024, // 1MB
+		PathPerm:     0o700,
+		FilePerm:     0o600,
 	})
 
-	globalManager = &Manager{dv: dv}
-	return globalManager, nil
+	manager := &Manager{dv: dv}
+	managers[path] = manager
+	return manager, nil
 }
 
 // HashKey converts a potentially unsafe string into a safe MD5 hash for disk storage
@@ -63,7 +77,7 @@ func (m *Manager) GenerateKey(namespace string, params any) string {
 	op := "default"
 	if params != nil {
 		t := reflect.TypeOf(params)
-		if t.Kind() == reflect.Ptr {
+		if t.Kind() == reflect.Pointer {
 			t = t.Elem()
 		}
 		op = t.String()
@@ -83,16 +97,11 @@ func (m *Manager) Set(key string, val any, ttl time.Duration) error {
 	}
 	safeKey := m.HashKey(key)
 	slog.Log(context.Background(), config.LevelTrace, "Cache: SET", "key", key, "safeKey", safeKey, "ttl", ttl)
-	var data []byte
-	var err error
-
-	if b, ok := val.([]byte); ok {
-		data = b
-	} else {
-		data, err = json.Marshal(val)
-		if err != nil {
-			return err
-		}
+	// Marshal binary values too: encoding/json stores []byte as base64 instead
+	// of treating image bytes as raw JSON in the cache envelope.
+	data, err := json.Marshal(val)
+	if err != nil {
+		return err
 	}
 
 	var expiresAt int64
@@ -114,7 +123,7 @@ func (m *Manager) Set(key string, val any, ttl time.Duration) error {
 }
 
 // Get retrieves cached data.
-func (m *Manager) Get(key string, val interface{}) error {
+func (m *Manager) Get(key string, val any) error {
 	if config.Get().NoCache {
 		return fmt.Errorf("caching is disabled")
 	}
@@ -130,15 +139,10 @@ func (m *Manager) Get(key string, val interface{}) error {
 		return err
 	}
 
-	if entry.ExpiresAt > 0 && time.Now().Unix() > entry.ExpiresAt {
+	if entry.ExpiresAt > 0 && time.Now().Unix() >= entry.ExpiresAt {
 		slog.Log(context.Background(), config.LevelTrace, "Cache: EXPIRED", "key", key, "safeKey", safeKey)
 		_ = m.dv.Erase(safeKey)
 		return fmt.Errorf("cache entry expired")
-	}
-
-	if b, ok := val.(*[]byte); ok {
-		*b = entry.Value
-		return nil
 	}
 
 	return json.Unmarshal(entry.Value, val)
@@ -146,7 +150,7 @@ func (m *Manager) Get(key string, val interface{}) error {
 
 // WithCache is a helper that tries to get data from cache first, otherwise calls the fetcher
 func WithCache[T any](m *Manager, key string, ttl time.Duration, val *T, fetcher func() (*T, error)) error {
-	if ttl > 0 {
+	if m != nil && ttl > 0 {
 		if err := m.Get(key, val); err == nil {
 			return nil
 		}
@@ -158,8 +162,10 @@ func WithCache[T any](m *Manager, key string, ttl time.Duration, val *T, fetcher
 
 	if fetched != nil {
 		*val = *fetched
-		if ttl > 0 {
-			return m.Set(key, fetched, ttl)
+		if m != nil && ttl > 0 {
+			if err := m.Set(key, fetched, ttl); err != nil {
+				slog.Warn("Cache: failed to save fetched data", "error", err)
+			}
 		}
 	}
 

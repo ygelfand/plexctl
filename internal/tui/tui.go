@@ -14,15 +14,20 @@ import (
 	tint "github.com/lrstanley/bubbletint"
 	"github.com/ygelfand/plexctl/internal/config"
 	"github.com/ygelfand/plexctl/internal/plex"
+	"github.com/ygelfand/plexctl/internal/tui/artwork"
 	"github.com/ygelfand/plexctl/internal/tui/player"
 	"github.com/ygelfand/plexctl/internal/tui/view"
 	"github.com/ygelfand/plexctl/internal/tui/view/detail"
 	tuiconfig "github.com/ygelfand/plexctl/internal/tui/widget/config"
 	"github.com/ygelfand/plexctl/internal/tui/widget/help"
+	"github.com/ygelfand/plexctl/internal/tui/widget/letterjump"
+	"github.com/ygelfand/plexctl/internal/tui/widget/playback"
+	"github.com/ygelfand/plexctl/internal/tui/widget/poster"
 	"github.com/ygelfand/plexctl/internal/tui/widget/resume"
 	tuisearch "github.com/ygelfand/plexctl/internal/tui/widget/search"
 	"github.com/ygelfand/plexctl/internal/tui/widget/settings"
 	"github.com/ygelfand/plexctl/internal/tui/widget/userpicker"
+	"github.com/ygelfand/plexctl/internal/tui/widget/visualizer"
 	"github.com/ygelfand/plexctl/internal/ui"
 	"go.dalton.dog/bubbleup"
 )
@@ -36,12 +41,35 @@ type Controller struct {
 	player     *player.PlayerManager
 	alert      bubbleup.AlertModel
 
-	playerStatus player.PlayerStatus
-	returnTabIdx int
+	playerStatus    player.PlayerStatus
+	returnTabIdx    int
+	visualizer      visualizer.Model
+	visualTick      time.Time
+	focus           paneFocus
+	focusedAlphabet *ui.AlphabetRail
+	userSwitchID    uint64
+	userPickerID    uint64
+	reloadID        uint64
 }
 
-type switchUserSuccessMsg struct{}
-type reloadedDataMsg plex.LoaderResult
+type usersLoadedMsg struct {
+	id    uint64
+	users []operations.HomeUser
+	err   error
+}
+
+type switchUserSuccessMsg struct {
+	id         uint64
+	owner      Overlay
+	homeUser   config.HomeUser
+	invalidPin bool
+	err        error
+}
+type reloadedDataMsg struct {
+	id   uint64
+	data plex.LoaderResult
+	err  error
+}
 
 func NewController(data plex.LoaderResult) *Controller {
 	cfg := config.Get()
@@ -100,7 +128,6 @@ func (c *Controller) Init() tea.Cmd {
 		cmds = append(cmds, overlay.Init())
 	}
 
-	cmds = append(cmds, c.player.WaitForUpdates())
 	cmds = append(cmds, c.player.PollUpdates())
 	cmds = append(cmds, c.player.Reconnect())
 	cmds = append(cmds, c.alert.Init())
@@ -116,15 +143,63 @@ func (c *Controller) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg := msg.(type) {
+	case view.DataLoadedMsg:
+		for _, model := range c.tabManager.tabModels {
+			if msg.Owns(model) {
+				_, cmd := model.Update(msg)
+				return c, cmd
+			}
+		}
+		return c, nil
+	case view.SearchIndexProgressMsg, view.SearchIndexFinishedMsg:
+		for _, model := range c.tabManager.tabModels {
+			if status, ok := model.(*view.SearchStatusView); ok {
+				_, cmd := status.Update(msg)
+				cmds = append(cmds, cmd)
+			}
+		}
+		return c, tea.Batch(cmds...)
+	case view.FriendsServersMsg, view.FriendsLibrariesMsg:
+		friends := c.tabManager.tabModels[c.tabManager.friendsIdx]
+		_, cmd := friends.Update(msg)
+		return c, cmd
+	case poster.PosterLoadedMsg, detail.PosterDataMsg, detail.DataMsg:
+		for _, model := range c.tabManager.tabModels {
+			if model != nil {
+				_, cmd := model.Update(msg)
+				cmds = append(cmds, cmd)
+			}
+		}
+		return c, tea.Batch(cmds...)
+	case ui.MediaPageMsg:
+		// Request IDs and server IDs keep asynchronous replies with their view.
+		for _, model := range c.tabManager.tabModels {
+			switch model := model.(type) {
+			case *view.MediaView:
+				_, cmd := model.Update(msg)
+				cmds = append(cmds, cmd)
+			case *view.FriendsView:
+				_, cmd := model.Update(msg)
+				cmds = append(cmds, cmd)
+			}
+		}
+		return c, tea.Batch(cmds...)
 	case tea.WindowSizeMsg:
+		cmds = append(cmds, c.player.ResizeOverlay())
+		ui.GetLayout().SetPlayerHeight(c.playerHeight(msg.Height))
 		ui.GetLayout().Update(msg.Width, msg.Height, c.playerStatus.Active())
 		for i, model := range c.tabManager.tabModels {
 			if model != nil {
-				c.tabManager.tabModels[i], _ = model.Update(msg)
+				var cmd tea.Cmd
+				c.tabManager.tabModels[i], cmd = model.Update(msg)
+				cmds = append(cmds, cmd)
 			}
 		}
 
 	case settings.SettingsFinishedMsg:
+		if err := artwork.Select(msg.Config.PosterRenderer); err != nil {
+			return c, func() tea.Msg { return err }
+		}
 		tints := append([]tint.Tint{ui.PlexctlTheme}, tint.DefaultTints()...)
 		for _, t := range tints {
 			if t.ID() == msg.Config.Theme {
@@ -133,7 +208,7 @@ func (c *Controller) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 		}
-		return c, c.tabManager.setupTabs(c.data, c.theme, ui.SidebarWidth)
+		return c, tea.Batch(c.tabManager.setupTabs(c.data, c.theme, ui.SidebarWidth), resizePlayer(), tea.ClearScreen)
 
 	case tuiconfig.ConfigFinishedMsg:
 		cfg := config.Get()
@@ -156,6 +231,17 @@ func (c *Controller) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ui.UserSelectionMsg:
 		return c, c.navigator.Push(userpicker.NewUserPickerOverlayModel(msg.Users, c.theme))
+	case usersLoadedMsg:
+		if msg.id != c.userPickerID {
+			return c, nil
+		}
+		if msg.err != nil {
+			return c, c.alert.NewAlertCmd("error", msg.err.Error())
+		}
+		if len(msg.users) <= 1 {
+			return c, nil
+		}
+		return c.Update(ui.UserSelectionMsg{Users: msg.users})
 
 	case ui.InvalidPinMsg:
 		if overlay := c.navigator.ActiveOverlay(); overlay != nil {
@@ -171,81 +257,121 @@ func (c *Controller) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return c, c.handleSwitchUser(msg)
 
 	case switchUserSuccessMsg:
-		c.navigator.Pop()
-		// Return a command that triggers a full data reload
-		return c, c.fullReload()
+		if msg.id != c.userSwitchID || msg.owner != c.navigator.ActiveOverlay() {
+			return c, nil
+		}
+		if msg.invalidPin {
+			return c.Update(ui.InvalidPinMsg{})
+		}
+		if msg.err != nil {
+			return c, c.alert.NewAlertCmd("error", msg.err.Error())
+		}
+		cfg := config.Get()
+		c.userPickerID++
+		cfg.HomeUser = msg.homeUser
+		if err := cfg.Save(); err != nil {
+			cmds = append(cmds, c.alert.NewAlertCmd("error", err.Error()))
+		}
+		if msg.owner != nil {
+			c.navigator.Pop()
+		}
+		// Retire views with the previous user's credentials before reloading.
+		c.data = plex.LoaderResult{ServerID: cfg.DefaultServer}
+		c.tabManager.activeTabIdx = 0
+		c.returnTabIdx = -1
+		cmds = append(cmds, c.tabManager.setupTabs(c.data, c.theme, ui.SidebarWidth), c.fullReload())
+		return c, tea.Batch(cmds...)
 
 	case reloadedDataMsg:
-		c.data = plex.LoaderResult(msg)
+		if msg.id != c.reloadID {
+			return c, nil
+		}
+		if msg.err != nil {
+			return c, c.alert.NewAlertCmd("error", msg.err.Error())
+		}
+		c.data = msg.data
 		return c, c.tabManager.setupTabs(c.data, c.theme, ui.SidebarWidth)
 	}
 
-	if navCmd, captured := c.navigator.Update(msg); captured {
+	navCmd, captured := c.navigator.Update(msg)
+	if captured {
 		return c, navCmd
+	}
+	cmds = append(cmds, navCmd)
+	if mouse, ok := msg.(tea.MouseMsg); ok {
+		return c.handleMouse(mouse)
 	}
 
 	switch msg := msg.(type) {
+	case ui.JumpToLetterMsg:
+		if target, ok := c.tabManager.ActiveModel().(ui.LetterJumper); ok && target.CanJumpLetters() {
+			c.focusPane(paneContent)
+			return c, target.JumpToLetter(msg.Letter)
+		}
+		return c, nil
 	case ui.RequestPlayMsg:
-		return c, player.FetchAndPlay(msg.RatingKey, msg.TctMode)
+		return c, player.FetchAndPlay(msg.RatingKey, msg.Output, msg.Server)
 	case ui.ResumeChoiceMsg:
-		return c, c.navigator.Push(resume.NewResumeOverlayModel(msg.Metadata, msg.TctMode, c.theme))
+		return c, c.navigator.Push(resume.NewResumeOverlayModel(msg.Metadata, msg.Output, c.theme, msg.Server))
 	case ui.SelectMediaMsg:
 		return c, c.handleSelectMedia(msg)
 	case ui.JumpToDetailMsg:
 		return c, c.handleJumpToDetail(msg)
 	case player.PlayerStatusMsgPoller:
-		if msg == (player.PlayerStatusMsgPoller{}) && !c.playerStatus.Active() {
-			return c, nil
-		}
-		oldActive := c.playerStatus.Active()
-		c.playerStatus = c.player.Status()
-		if oldActive != c.playerStatus.Active() {
-			ui.GetLayout().Update(ui.GetLayout().TotalWidth(), ui.GetLayout().TotalHeight(), c.playerStatus.Active())
-			cmds = append(cmds, func() tea.Msg {
-				return tea.WindowSizeMsg{Width: ui.GetLayout().TotalWidth(), Height: ui.GetLayout().TotalHeight()}
-			})
-		}
-		if c.playerStatus.Active() {
-			cmds = append(cmds, c.player.PollUpdates())
-		}
+		cmds = append(cmds, c.refreshPlayer(), c.player.PollUpdates())
 		return c, tea.Batch(cmds...)
 	case player.PlayerStatusMsg:
-		oldActive := c.playerStatus.Active()
-		c.playerStatus = c.player.Status()
-		if oldActive != c.playerStatus.Active() {
-			ui.GetLayout().Update(ui.GetLayout().TotalWidth(), ui.GetLayout().TotalHeight(), c.playerStatus.Active())
-			cmds = append(cmds, func() tea.Msg {
-				return tea.WindowSizeMsg{Width: ui.GetLayout().TotalWidth(), Height: ui.GetLayout().TotalHeight()}
-			})
-			if c.playerStatus.Active() {
-				cmds = append(cmds, c.player.PollUpdates())
-			}
-		}
-		return c, tea.Batch(append(cmds, c.player.WaitForUpdates())...)
+		return c, c.refreshPlayer()
+	case player.VideoFallbackMsg:
+		return c, tea.Batch(c.refreshPlayer(), c.alert.NewAlertCmd("info", msg.String()))
 
 	case tea.KeyMsg:
 		slog.Log(context.Background(), config.LevelTrace, "TUI: key press", "key", msg.String())
+		if cmd, handled := c.paneKey(msg.String()); handled {
+			return c, cmd
+		}
 		switch msg.String() {
+		case "g":
+			if target, ok := c.tabManager.ActiveModel().(ui.LetterJumper); ok && target.CanJumpLetters() {
+				return c, c.navigator.Push(letterjump.New(c.theme))
+			}
 		case "q", "ctrl+c":
-			if config.Get().CloseVideoOnQuit {
+			if config.Get().CloseVideoOnQuit || c.playerStatus.AudioOnly || c.playerStatus.Overlay {
 				return c, c.player.Stop()
 			}
 			return c, tea.Quit
 		case "ctrl+s":
 			return c, c.navigator.Push(settings.NewSettingsOverlayModel(c.theme))
-		case "ctrl+l":
+		case "L":
 			return c, c.navigator.Push(tuiconfig.NewConfigOverlayModel(c.data.Libraries))
-		case "h":
+		case "H":
+			c.focusPane(paneContent)
 			return c, c.tabManager.SetActive(0)
-		case "p", "ctrl+p":
-			tctMode := msg.String() == "ctrl+p"
+		case "p", "ctrl+p", "v":
+			output := config.VideoWindow
+			if msg.String() == "ctrl+p" {
+				output = config.Get().TerminalVideo
+			}
 			if provider, ok := c.tabManager.ActiveModel().(ui.PlayableProvider); ok {
 				meta := provider.GetSelectedMetadata()
 				if meta != nil && meta.RatingKey != nil {
+					if config.IsMusic(meta.Type) {
+						if msg.String() == "v" {
+							return c, c.navigator.Push(playback.NewMusic(*meta.RatingKey, meta.Title, c.theme, c.mediaServer()))
+						}
+						output = config.Get().MusicOutput()
+						if msg.String() == "ctrl+p" {
+							output = config.AudioTerminal
+						}
+					}
+					if msg.String() == "v" {
+						return c, c.navigator.Push(playback.New(*meta.RatingKey, meta.Title, c.theme, c.mediaServer()))
+					}
+					server := c.mediaServer()
 					return c, func() tea.Msg {
-						return ui.RequestPlayMsg{
+						return ui.RequestPlayMsg{Server: server,
 							RatingKey: *meta.RatingKey,
-							TctMode:   tctMode,
+							Output:    output,
 						}
 					}
 				}
@@ -257,17 +383,30 @@ func (c *Controller) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return c, c.player.TogglePause()
 			}
 		case "tab":
+			c.focusPane(paneContent)
 			return c, c.tabManager.NextTab()
 		case "x":
 			if c.playerStatus.Active() {
 				return c, c.player.StopPlayback()
 			}
+		case "[", "]", "+", "=", "-", "m", "z":
+			if c.playerStatus.Active() {
+				return c, c.musicControl(msg.String())
+			}
 		case "/":
-			return c, c.navigator.Push(tuisearch.NewSearchOverlayModel(c.theme))
+			server := c.mediaServer()
+			if server.ID == "" {
+				return c, c.alert.NewAlertCmd("error", "Choose a friend's server to search its shared libraries")
+			}
+			return c, c.navigator.Push(tuisearch.NewSearchOverlayModel(c.theme, server))
 		case "u":
 			return c, c.triggerUserSwitch()
 		case "shift+tab":
+			c.focusPane(paneContent)
 			return c, c.tabManager.PrevTab()
+		}
+		if c.focus != paneContent {
+			return c, nil
 		}
 	}
 
@@ -294,10 +433,14 @@ func (c *Controller) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (c *Controller) handleSelectMedia(msg ui.SelectMediaMsg) tea.Cmd {
+	server := config.MediaServer(msg.Server)
+	if !server.Shared && server.CacheNamespace() != config.Get().MediaCacheNamespace() {
+		return nil
+	}
 	returnTabIdx := c.tabManager.activeTabIdx
-	if msg.SectionID != "" {
+	if msg.SectionID != "" || server.Shared {
 		return func() tea.Msg {
-			return ui.JumpToDetailMsg{
+			return ui.JumpToDetailMsg{Server: server,
 				SectionID:    msg.SectionID,
 				RatingKey:    msg.RatingKey,
 				Type:         msg.Type,
@@ -307,7 +450,7 @@ func (c *Controller) handleSelectMedia(msg ui.SelectMediaMsg) tea.Cmd {
 	}
 
 	return func() tea.Msg {
-		meta, err := plex.GetMetadata(context.Background(), msg.RatingKey, false)
+		meta, err := plex.GetMetadata(server.Context(context.Background()), msg.RatingKey, false)
 		if err != nil {
 			return err
 		}
@@ -320,7 +463,7 @@ func (c *Controller) handleSelectMedia(msg ui.SelectMediaMsg) tea.Cmd {
 			}
 		}
 		if sectionID != "" {
-			return ui.JumpToDetailMsg{
+			return ui.JumpToDetailMsg{Server: server,
 				SectionID:    sectionID,
 				RatingKey:    msg.RatingKey,
 				Type:         msg.Type,
@@ -332,6 +475,16 @@ func (c *Controller) handleSelectMedia(msg ui.SelectMediaMsg) tea.Cmd {
 }
 
 func (c *Controller) handleJumpToDetail(msg ui.JumpToDetailMsg) tea.Cmd {
+	if msg.Server.ID != "" && !msg.Server.Shared && msg.Server.CacheNamespace() != config.Get().MediaCacheNamespace() {
+		return nil
+	}
+	if msg.Server.Shared {
+		friends := c.tabManager.tabModels[c.tabManager.friendsIdx].(*view.FriendsView)
+		c.returnTabIdx = -1
+		c.focusPane(paneContent)
+		c.tabManager.SetActive(c.tabManager.friendsIdx)
+		return friends.ShowDetail(msg)
+	}
 	slog.Debug("Controller: handleJumpToDetail", "key", msg.RatingKey, "type", msg.Type, "section", msg.SectionID)
 
 	// 1. If SectionID is specified, find that specific tab
@@ -340,6 +493,7 @@ func (c *Controller) handleJumpToDetail(msg ui.JumpToDetailMsg) tea.Cmd {
 			if libTab, ok := tab.(*view.MediaView); ok {
 				if libTab.GetSectionID() == msg.SectionID {
 					slog.Debug("Controller: Found matching library tab", "idx", i)
+					c.focusPane(paneContent)
 					initCmd := c.tabManager.SetActive(i)
 					c.returnTabIdx = msg.ReturnTabIdx
 					return tea.Batch(initCmd, libTab.ShowDetail(msg.RatingKey, msg.Type))
@@ -351,6 +505,7 @@ func (c *Controller) handleJumpToDetail(msg ui.JumpToDetailMsg) tea.Cmd {
 	// 2. Fallback: If no section specified OR not found, try the active tab
 	if activeTab, ok := c.tabManager.ActiveModel().(*view.MediaView); ok {
 		slog.Debug("Controller: Applying jump to active library tab")
+		c.focusPane(paneContent)
 		return activeTab.ShowDetail(msg.RatingKey, msg.Type)
 	}
 
@@ -359,14 +514,18 @@ func (c *Controller) handleJumpToDetail(msg ui.JumpToDetailMsg) tea.Cmd {
 }
 
 func (c *Controller) handleSwitchUser(msg ui.SwitchUserMsg) tea.Cmd {
+	c.userSwitchID++
+	id, owner := c.userSwitchID, c.navigator.ActiveOverlay()
+	serverID, _, _ := config.Get().GetActiveServer()
+	client, clientErr := plex.NewHomeHomeUserClient()
 	return func() tea.Msg {
-		cfg := config.Get()
-
-		// 1. Get client using home user auth token to perform the switch
-		client, err := plex.NewHomeHomeUserClient()
-		if err != nil {
-			return err
+		result := switchUserSuccessMsg{id: id, owner: owner}
+		if clientErr != nil {
+			result.err = clientErr
+			return result
 		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 
 		slog.Info("TUI: Switching user", "target", msg.User.Title, "uuid", msg.User.UUID)
 
@@ -379,37 +538,41 @@ func (c *Controller) handleSwitchUser(msg ui.SwitchUserMsg) tea.Cmd {
 			}
 		}
 
-		res, err := client.SDK.HomeUsers.SwitchUser(context.Background(), req)
+		res, err := client.SDK.HomeUsers.SwitchUser(ctx, req)
 		if err != nil {
 			// Check for 403/Forbidden which indicates invalid PIN
 			if strings.Contains(err.Error(), "403") || strings.Contains(strings.ToLower(err.Error()), "pin is required") {
-				return ui.InvalidPinMsg{}
+				result.invalidPin = true
+				return result
 			}
 			slog.Error("TUI: Switch user failed", "error", err)
-			return err
+			result.err = err
+			return result
 		}
 
-		if res.UserPlexAccount == nil {
-			return fmt.Errorf("failed to switch user: no account data returned")
+		if res.UserPlexAccount == nil || res.UserPlexAccount.AuthToken == "" {
+			result.err = fmt.Errorf("failed to switch user: no account data returned")
+			return result
 		}
 
 		// 2. We got an AuthToken. Now we need to use THIS specific AuthToken to get resources
 		slog.Info("TUI: Fetching server-specific token for home user")
-		newClient, err := plex.NewClientWithToken(res.UserPlexAccount.AuthToken)
+		newClient, err := plex.NewAccountClientWithToken(res.UserPlexAccount.AuthToken)
 		if err != nil {
-			return err
+			result.err = err
+			return result
 		}
 
-		resources, err := newClient.SDK.Plex.GetServerResources(context.Background(), operations.GetServerResourcesRequest{
+		resources, err := newClient.SDK.Plex.GetServerResources(ctx, operations.GetServerResourcesRequest{
 			IncludeHTTPS: operations.IncludeHTTPSTrue.ToPointer(),
 		})
 		if err != nil {
 			slog.Error("TUI: Failed to get server resources for home user", "error", err)
-			return err
+			result.err = err
+			return result
 		}
 
-		serverID, _, _ := cfg.GetActiveServer()
-		accessToken := res.UserPlexAccount.AuthToken // Fallback to auth token if server-specific one isn't found
+		accessToken := ""
 		for _, dev := range resources.PlexDevices {
 			if dev.ClientIdentifier == serverID && dev.AccessToken != "" {
 				slog.Info("TUI: Found server-specific token", "server", dev.Name)
@@ -417,50 +580,58 @@ func (c *Controller) handleSwitchUser(msg ui.SwitchUserMsg) tea.Cmd {
 				break
 			}
 		}
+		if accessToken == "" {
+			result.err = fmt.Errorf("selected user does not have access to this server")
+			return result
+		}
 
-		// 3. Save both tokens
-		cfg.HomeUser.AuthToken = res.UserPlexAccount.AuthToken
-		cfg.HomeUser.AccessToken = accessToken
-		_ = cfg.Save()
-
-		slog.Info("TUI: User switched successfully")
-		return switchUserSuccessMsg{}
+		result.homeUser = config.HomeUser{AuthToken: res.UserPlexAccount.AuthToken, AccessToken: accessToken, ServerID: serverID}
+		return result
 	}
 }
 
 func (c *Controller) triggerUserSwitch() tea.Cmd {
+	c.userPickerID++
+	id := c.userPickerID
+	client, clientErr := plex.NewHomeHomeUserClient()
 	return func() tea.Msg {
-		client, err := plex.NewHomeHomeUserClient()
-		if err != nil {
-			return err
+		if clientErr != nil {
+			return usersLoadedMsg{id: id, err: clientErr}
 		}
-		res, err := client.SDK.HomeUsers.GetHomeUsers(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		res, err := client.SDK.HomeUsers.GetHomeUsers(ctx)
 		if err != nil {
-			return err
+			return usersLoadedMsg{id: id, err: err}
 		}
 		if res.Object == nil {
-			return fmt.Errorf("no home data returned")
+			return usersLoadedMsg{id: id, err: fmt.Errorf("no home data returned")}
 		}
-		if len(res.Object.Users) <= 1 {
-			slog.Debug("TUI: 0 or 1 home user, skipping switch")
-			return nil
-		}
-		return ui.UserSelectionMsg{Users: res.Object.Users}
+		return usersLoadedMsg{id: id, users: res.Object.Users}
 	}
 }
 
 func (c *Controller) fullReload() tea.Cmd {
+	c.reloadID++
+	id, server := c.reloadID, config.Get().ServerTarget()
 	return func() tea.Msg {
-		updates := make(chan interface{}, 10)
-		go plex.LoadData(context.Background(), updates)
+		ctx, cancel := context.WithTimeout(server.Context(context.Background()), 2*time.Minute)
+		defer cancel()
+		updates := make(chan any, 10)
+		go plex.LoadData(ctx, updates)
 
 		for {
-			msg := <-updates
+			var msg any
+			select {
+			case msg = <-updates:
+			case <-ctx.Done():
+				return reloadedDataMsg{id: id, err: ctx.Err()}
+			}
 			if res, ok := msg.(plex.LoaderResult); ok {
-				return reloadedDataMsg(res)
+				return reloadedDataMsg{id: id, data: res}
 			}
 			if err, ok := msg.(error); ok {
-				return err
+				return reloadedDataMsg{id: id, err: err}
 			}
 		}
 	}
@@ -468,12 +639,26 @@ func (c *Controller) fullReload() tea.Cmd {
 
 func (c *Controller) showHelp() tea.Cmd {
 	keys := []ui.HelpKey{
+		{Key: "h / j / k / l", Desc: "Navigate content: left / down / up / right (or arrow keys)"},
+		{Key: "click", Desc: "Open posters, rows, navigation, and actions"},
+		{Key: "wheel", Desc: "Scroll under pointer; Shift+wheel browses a poster row"},
+		{Key: "right click", Desc: "Back / close dialog (Shift bypasses mouse capture)"},
 		{Key: "tab", Desc: "Switch Library"},
-		{Key: "h", Desc: "Home"},
+		{Key: "ctrl+h / j / k / l", Desc: "Focus pane: left / down / up / right"},
+		{Key: "j / k, enter", Desc: "In navigation: select a library, then open it"},
+		{Key: "ctrl+l, j / k, enter", Desc: "From content: focus A–Z, choose a letter, then jump"},
+		{Key: "g, then A–Z / #", Desc: "Jump to a letter (or click the right-hand alphabet)"},
+		{Key: "Home / End / PgUp / PgDn", Desc: "First / last item / previous / next page"},
+		{Key: "H", Desc: "Home"},
 		{Key: "ctrl+s", Desc: "Global Settings"},
-		{Key: "ctrl+l", Desc: "Libraries"},
+		{Key: "L", Desc: "Libraries"},
 		{Key: "u", Desc: "Switch User"},
 		{Key: "p", Desc: "Play Selected"},
+		{Key: "ctrl+p", Desc: "Play in Terminal"},
+		{Key: "v", Desc: "Choose player (music: terminal / window; video: renderer)"},
+		{Key: "[ / ]", Desc: "Seek backward / forward 10 seconds"},
+		{Key: "+ / - / m", Desc: "Volume up / down / mute"},
+		{Key: "z", Desc: "Cycle music visualizer: waveform / spectrum / mirror / off"},
 		{Key: "x", Desc: "Stop Playback"},
 		{Key: "q", Desc: "Quit"},
 		{Key: "?", Desc: "Help"},
@@ -491,9 +676,10 @@ func (c *Controller) showHelp() tea.Cmd {
 }
 
 func (c *Controller) View() string {
+	c.player.SetOverlayVisible(c.navigator.ActiveOverlay() == nil)
 	base := c.renderBaseView()
 	base = c.navigator.Render(base)
-	return c.alert.Render(base)
+	return artwork.Frame(c.alert.Render(base))
 }
 
 func (c *Controller) renderBaseView() string {
@@ -506,24 +692,27 @@ func (c *Controller) renderBaseView() string {
 	mainHeight := max(layout.TotalHeight()-1, 0)
 
 	c.tabManager.navbar.Height = mainHeight
+	c.tabManager.navbar.SetFocused(c.focus == paneSidebar)
 	sidebar := c.tabManager.navbar.View()
 
 	// The content box should fill the remaining height
 	// ContentHeight already accounts for player bar if active
 	contentHeight := layout.ContentHeight()
 
-	windowStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder(), true).
-		BorderForeground(c.theme.BrightBlack()).
-		Padding(0, 1).
-		Width(layout.MainAreaContentWidth()).
-		Height(contentHeight)
-
 	content := ""
 	if model := c.tabManager.ActiveModel(); model != nil {
 		content = model.View()
 	}
+	c.validateAlphabetFocus()
 
+	windowStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder(), true).
+		BorderForeground(c.paneBorder(paneContent)).
+		Padding(0, 1).
+		Width(layout.MainAreaContentWidth() + 2).
+		Height(contentHeight)
+
+	content = lipgloss.NewStyle().MaxWidth(layout.InnerWidth()).MaxHeight(contentHeight).Render(content)
 	body := windowStyle.Render(content)
 
 	if c.playerStatus.Active() {
@@ -538,13 +727,93 @@ func (c *Controller) renderBaseView() string {
 		Background(c.theme.BrightBlack()).
 		Foreground(c.theme.White()).
 		Padding(0, 1).
-		Render(" q: quit | tab: switch lib | h: home | ctrl+s: settings | ctrl+l: libs | u: user | p: play | x: stop ")
+		Render(c.footerText())
 
 	return lipgloss.JoinVertical(lipgloss.Left, mainArea, footer)
 }
 
+func (c *Controller) footerText() string {
+	text := "Ctrl+HJKL: panes | [p] Play | [v] Player | [V] View | [/] Search | [?] Help | [q] Quit"
+	if c.playerStatus.Active() {
+		text = "Ctrl+HJKL: panes | [p] Play | [v] Player | [x] Stop | [/] Search | [?] Help | [q] Quit"
+	}
+	switch c.focus {
+	case paneSidebar:
+		text = "Navigation | j/k: select | [enter] Open | Ctrl+L: content | [L] Libraries | [?] Help"
+	case panePlayer:
+		text = "Player | h/l: seek | j/k: volume | [space] Pause | Ctrl+K: content | [?] Help"
+	case paneAlphabet:
+		text = "Alphabet | j/k or ↑/↓: select | [enter] Jump | Ctrl+H: content | [esc] Cancel | [?] Help"
+	}
+	return ui.Ellipsis(text, max(1, ui.GetLayout().TotalWidth()-2))
+}
+
+func (c *Controller) handleMouse(mouse tea.MouseMsg) (tea.Model, tea.Cmd) {
+	layout := ui.GetLayout()
+	if ui.RightClick(mouse) {
+		c.focusPane(paneContent)
+		return c.Update(ui.KeyPress("esc"))
+	}
+	if mouse.X < ui.SidebarWidth && mouse.Y < layout.TotalHeight()-1 {
+		if delta := ui.WheelDelta(mouse); delta != 0 {
+			c.tabManager.navbar.Scroll(delta * 3)
+		} else if ui.LeftClick(mouse) {
+			c.focusPane(paneSidebar)
+			if index := c.tabManager.navbar.ItemAt(mouse); index >= 0 {
+				return c, c.tabManager.SetActive(index)
+			}
+			if key := c.tabManager.navbar.ActionAt(mouse); key != "" {
+				return c.Update(ui.KeyPress(key))
+			}
+		}
+		return c, nil
+	}
+	if mouse.Y == layout.TotalHeight()-1 {
+		local := mouse
+		local.X-- // Footer padding.
+		local.Y = 0
+		if key := ui.ShortcutAt(c.footerText(), local); key != "" {
+			return c.Update(ui.KeyPress(key))
+		}
+		return c, nil
+	}
+	rect := ui.Rect{X: ui.SidebarTotalWidth + 2, Y: 1, Width: layout.InnerWidth(), Height: layout.ContentHeight()}
+	local, inside := rect.Local(mouse)
+	if !inside {
+		if c.playerStatus.Active() && mouse.X > ui.SidebarTotalWidth &&
+			mouse.Y >= rect.Height+2 && mouse.Y < layout.TotalHeight()-1 {
+			if ui.LeftClick(mouse) {
+				c.focusPane(panePlayer)
+			}
+			return c, c.playerMouse(mouse, rect.Height+2)
+		}
+		return c, nil
+	}
+	if ui.LeftClick(mouse) {
+		c.focusPane(paneContent)
+	}
+	if model := c.tabManager.ActiveModel(); model != nil {
+		// Detail action bars appear at the bottom of their own view.
+		view := model.View()
+		if actions, ok := model.(interface{ ActionRows() int }); ok {
+			if local.Y >= lipgloss.Height(view)-actions.ActionRows() {
+				if key := ui.ShortcutAt(view, local); key != "" {
+					return c.Update(ui.KeyPress(key))
+				}
+			}
+		}
+		var cmd tea.Cmd
+		c.tabManager.tabModels[c.tabManager.activeTabIdx], cmd = model.Update(local)
+		return c, cmd
+	}
+	return c, nil
+}
+
 func (c *Controller) renderPlayer() string {
 	layout := ui.GetLayout()
+	if c.playerStatus.AudioOnly {
+		return c.renderMusicPlayer()
+	}
 	width := layout.MainAreaContentWidth()
 	status := "▶ PLAYING"
 	if c.playerStatus.Paused() {
@@ -553,7 +822,7 @@ func (c *Controller) renderPlayer() string {
 
 	progress := 0.0
 	if c.playerStatus.Duration > 0 {
-		progress = c.playerStatus.Time / c.playerStatus.Duration
+		progress = max(0, min(1, c.playerStatus.Time/c.playerStatus.Duration))
 	}
 
 	barWidth := max(width-35, 10)
@@ -568,7 +837,8 @@ func (c *Controller) renderPlayer() string {
 	timeStr := fmt.Sprintf("%s / %s", ui.FormatDuration(int(c.playerStatus.Time*1000)), ui.FormatDuration(int(c.playerStatus.Duration*1000)))
 	title := lipgloss.NewStyle().Foreground(c.theme.BrightYellow()).Bold(true).Width(width - 2).Render(c.playerStatus.Title)
 
-	playerStyle := lipgloss.NewStyle().Border(lipgloss.RoundedBorder(), true).BorderForeground(accent).Width(width).Padding(0, 1)
+	playerStyle := lipgloss.NewStyle().Border(lipgloss.RoundedBorder(), true).
+		BorderForeground(c.paneBorder(panePlayer)).Width(width).Padding(0, 1)
 
 	row2 := lipgloss.JoinHorizontal(lipgloss.Center,
 		lipgloss.NewStyle().Foreground(c.theme.BrightCyan()).Width(12).Render(status),
@@ -577,4 +847,11 @@ func (c *Controller) renderPlayer() string {
 	)
 
 	return playerStyle.Render(lipgloss.JoinVertical(lipgloss.Left, title, row2))
+}
+
+func (c *Controller) mediaServer() config.ServerTarget {
+	if provider, ok := c.tabManager.ActiveModel().(ui.ServerProvider); ok {
+		return provider.MediaServer()
+	}
+	return config.Get().ServerTarget()
 }

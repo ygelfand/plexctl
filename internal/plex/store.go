@@ -12,8 +12,10 @@ import (
 )
 
 type Store struct {
-	client *Client
-	cache  *cache.Manager
+	client  *Client
+	account *Client
+	cache   *cache.Manager
+	server  config.ServerTarget
 
 	// Cache for IDs to Titles
 	userCache    map[int64]string
@@ -22,36 +24,56 @@ type Store struct {
 	mu           sync.RWMutex
 }
 
+type storeKey struct {
+	server   config.ServerTarget
+	cacheDir string
+}
+
 var (
-	storeInstance *Store
-	storeOnce     sync.Once
+	storesMu sync.Mutex
+	stores   = make(map[storeKey]*Store)
 )
 
 func GetStore() (*Store, error) {
-	var err error
-	storeOnce.Do(func() {
-		client, cErr := NewClient()
-		if cErr != nil {
-			err = cErr
-			return
-		}
+	return GetStoreForContext(context.Background())
+}
 
-		cfg := config.Get()
-		cm, cErr := cache.Get(cfg.CacheDir)
-		if cErr != nil {
-			err = cErr
-			return
+// GetStoreForContext retains the credentials that own the request and its caches.
+// Switching profiles must never reuse a previous profile's authenticated client.
+func GetStoreForContext(ctx context.Context) (*Store, error) {
+	server := config.ServerFromContext(ctx)
+	key := storeKey{server: server, cacheDir: config.Get().CacheDir}
+	storesMu.Lock()
+	defer storesMu.Unlock()
+	if store := stores[key]; store != nil {
+		return store, nil
+	}
+	client, err := newClient(server.Token, server.URL)
+	if err != nil {
+		return nil, err
+	}
+	var account *Client
+	if server.AccountToken != "" {
+		account, err = newClient(server.AccountToken, "")
+		if err != nil {
+			return nil, err
 		}
-
-		storeInstance = &Store{
-			client:       client,
-			cache:        cm,
-			userCache:    make(map[int64]string),
-			deviceCache:  make(map[string]string),
-			libraryCache: make(map[string]string),
-		}
-	})
-	return storeInstance, err
+	}
+	cm, err := cache.Get(key.cacheDir)
+	if err != nil {
+		return nil, err
+	}
+	store := &Store{
+		client:       client,
+		account:      account,
+		cache:        cm,
+		server:       server,
+		userCache:    make(map[int64]string),
+		deviceCache:  make(map[string]string),
+		libraryCache: make(map[string]string),
+	}
+	stores[key] = store
+	return store, nil
 }
 
 func (s *Store) ResolveUser(ctx context.Context, id int64) (string, error) {
@@ -63,7 +85,10 @@ func (s *Store) ResolveUser(ctx context.Context, id int64) (string, error) {
 	s.mu.RUnlock()
 
 	// Refresh cache
-	res, err := s.client.SDK.Users.GetUsers(ctx, operations.GetUsersRequest{})
+	if s.account == nil {
+		return fmt.Sprintf("%d", id), fmt.Errorf("no account credential for user lookup")
+	}
+	res, err := s.account.SDK.Users.GetUsers(ctx, operations.GetUsersRequest{})
 	if err != nil {
 		return fmt.Sprintf("%d", id), err
 	}
@@ -151,9 +176,6 @@ func (s *Store) ListPlaybackHistory(ctx context.Context, request operations.List
 }
 
 func (s *Store) GetMetadata(ctx context.Context, ratingKey string, force bool) (*components.Metadata, error) {
-	cfg := config.Get()
-	serverID, _, _ := cfg.GetActiveServer()
-
 	var body components.MediaContainerWithMetadata
 	req := operations.GetMetadataItemRequest{
 		Ids:           []string{ratingKey},
@@ -165,7 +187,7 @@ func (s *Store) GetMetadata(ctx context.Context, ratingKey string, force bool) (
 		ttl = 0
 	}
 
-	err := cache.AutoCache(s.cache, serverID, req, ttl, &body, func() (*components.MediaContainerWithMetadata, error) {
+	err := cache.AutoCache(s.cache, s.server.CacheNamespace(), req, ttl, &body, func() (*components.MediaContainerWithMetadata, error) {
 		res, err := s.client.SDK.Content.GetMetadataItem(ctx, req)
 		if err != nil {
 			return nil, err
@@ -179,7 +201,7 @@ func (s *Store) GetMetadata(ctx context.Context, ratingKey string, force bool) (
 		return nil, err
 	}
 
-	if len(body.MediaContainer.Metadata) == 0 {
+	if body.MediaContainer == nil || len(body.MediaContainer.Metadata) == 0 {
 		return nil, fmt.Errorf("metadata empty")
 	}
 

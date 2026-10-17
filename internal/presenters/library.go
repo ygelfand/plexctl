@@ -58,7 +58,7 @@ func (p *LibraryListPresenter) Rows() [][]string {
 	return rows
 }
 
-func (p *LibraryListPresenter) Raw() interface{} {
+func (p *LibraryListPresenter) Raw() any {
 	return p.Directories
 }
 
@@ -115,7 +115,7 @@ func (p *LibraryListPresenter) DefaultSort() string {
 type LibraryItemsPresenter struct {
 	SectionID string
 	Items     []GenericMetadata
-	RawData   interface{}
+	RawData   any
 }
 
 func (p *LibraryItemsPresenter) Title() string {
@@ -135,7 +135,7 @@ func (p *LibraryItemsPresenter) Rows() [][]string {
 	return rows
 }
 
-func (p *LibraryItemsPresenter) Raw() interface{} {
+func (p *LibraryItemsPresenter) Raw() any {
 	return p.RawData
 }
 

@@ -19,9 +19,10 @@ var deviceCmd = &cobra.Command{
 }
 
 var deviceListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List all devices associated with this account",
-	RunE: commands.RunWithServer(func(ctx context.Context, client *plex.Client, cmd *cobra.Command, args []string, opts *commands.PlexCtlOptions) error {
+	Use:         "list",
+	Short:       "List all devices associated with this account",
+	Annotations: map[string]string{ui.AnnotationSkipServerCheck: "true"},
+	RunE: commands.RunWithClient(func(ctx context.Context, client *plex.Client, cmd *cobra.Command, args []string, opts *commands.PlexCtlOptions) error {
 		res, err := client.SDK.Plex.GetServerResources(ctx, operations.GetServerResourcesRequest{})
 		if err != nil {
 			return err
@@ -39,10 +40,11 @@ var deviceListCmd = &cobra.Command{
 }
 
 var deviceShowCmd = &cobra.Command{
-	Use:   "show [device_id]",
-	Short: "Show detailed information for a device",
-	Args:  cobra.ExactArgs(1),
-	RunE: commands.RunWithServer(func(ctx context.Context, client *plex.Client, cmd *cobra.Command, args []string, opts *commands.PlexCtlOptions) error {
+	Use:         "show [device_id]",
+	Short:       "Show detailed information for a device",
+	Args:        cobra.ExactArgs(1),
+	Annotations: map[string]string{ui.AnnotationSkipServerCheck: "true"},
+	RunE: commands.RunWithClient(func(ctx context.Context, client *plex.Client, cmd *cobra.Command, args []string, opts *commands.PlexCtlOptions) error {
 		deviceID := args[0]
 		res, err := client.SDK.Plex.GetServerResources(ctx, operations.GetServerResourcesRequest{})
 		if err != nil {

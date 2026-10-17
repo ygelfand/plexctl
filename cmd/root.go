@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -38,10 +39,9 @@ var rootCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if config.Get().DefaultToTui {
-			return runTUI()
+			return runTUI(cmd)
 		}
-		cmd.Help()
-		return nil
+		return cmd.Help()
 	},
 }
 
@@ -68,13 +68,31 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.plexctl.yaml)")
 	rootCmd.PersistentFlags().StringVarP(&outputType, "output", "o", "table", "Output format (table, json, json-pretty, yaml, csv, txt)")
 	rootCmd.PersistentFlags().CountP("verbose", "v", "increase verbosity")
-	viper.BindPFlag("verbose", rootCmd.PersistentFlags().Lookup("verbose"))
+	cobra.CheckErr(viper.BindPFlag("verbose", rootCmd.PersistentFlags().Lookup("verbose")))
 
 	rootCmd.PersistentFlags().BoolVar(&noCache, "no-cache", false, "Disable caching")
-	viper.BindPFlag("no_cache", rootCmd.PersistentFlags().Lookup("no-cache"))
+	cobra.CheckErr(viper.BindPFlag("no_cache", rootCmd.PersistentFlags().Lookup("no-cache")))
 
 	rootCmd.PersistentFlags().StringVar(&sortCol, "sort", "", "column to sort by")
-	viper.BindPFlag("sort", rootCmd.PersistentFlags().Lookup("sort"))
+	cobra.CheckErr(viper.BindPFlag("sort", rootCmd.PersistentFlags().Lookup("sort")))
+	rootCmd.PersistentFlags().String("terminal-video", "auto", "Terminal video renderer for Ctrl+P or play (auto, kitty, sixel, tct)")
+	cobra.CheckErr(viper.BindPFlag("terminal_video", rootCmd.PersistentFlags().Lookup("terminal-video")))
+	playCmd.MarkFlagsMutuallyExclusive("tct", "terminal-video")
+	rootCmd.PersistentFlags().String("poster-renderer", "auto", "Poster renderer (auto, kitty, sixel, halfcell)")
+	rootCmd.PersistentFlags().String("terminal-video-mode", "suspend", "TUI terminal video mode (suspend, overlay)")
+	rootCmd.PersistentFlags().Int("sixel-video-width", 640, "Maximum Sixel video width in pixels (0 uses terminal size)")
+	rootCmd.PersistentFlags().String("window-music-visualizer", "cqt", "Music video visualization (cqt, spectrum, waves, scope, off)")
+	for _, binding := range []struct{ key, flag string }{
+		{key: "poster_renderer", flag: "poster-renderer"},
+		{key: "terminal_video_mode", flag: "terminal-video-mode"},
+		{key: "sixel_video_width", flag: "sixel-video-width"},
+		{key: "window_music_visualizer", flag: "window-music-visualizer"},
+	} {
+		cobra.CheckErr(viper.BindPFlag(binding.key, rootCmd.PersistentFlags().Lookup(binding.flag)))
+	}
+	cobra.CheckErr(rootCmd.RegisterFlagCompletionFunc("terminal-video", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+		return []string{"auto", "kitty", "sixel", "tct"}, cobra.ShellCompDirectiveNoFileComp
+	}))
 }
 
 func initConfig() {
@@ -101,15 +119,22 @@ func initConfig() {
 	viper.SetEnvPrefix("PLEXCTL")
 
 	// Explicitly bind env vars that don't have corresponding flags
-	viper.BindEnv("token")
+	cobra.CheckErr(viper.BindEnv("token"))
 
-	if err := viper.ReadInConfig(); err == nil {
-		cfg.ConfigPath = viper.ConfigFileUsed()
+	path, err := readConfigFile(viper.GetViper(), cfgFile != "")
+	if err != nil {
+		ui.RenderError(err)
+		os.Exit(1)
 	}
+	cfg.ConfigPath = path
 
 	// Unmarshal the loaded config into our struct
 	if err := viper.Unmarshal(cfg); err != nil {
 		ui.RenderError(fmt.Errorf("failed to parse config: %w", err))
+		os.Exit(1)
+	}
+	if err := cfg.ValidatePlayback(); err != nil {
+		ui.RenderError(err)
 		os.Exit(1)
 	}
 
@@ -136,4 +161,15 @@ func initConfig() {
 
 	// Sync back to viper for parts that still use it
 	viper.Set("output", cfg.OutputFormat)
+}
+
+func readConfigFile(v *viper.Viper, explicit bool) (string, error) {
+	if err := v.ReadInConfig(); err != nil {
+		var missing viper.ConfigFileNotFoundError
+		if !explicit && errors.As(err, &missing) {
+			return "", nil
+		}
+		return "", fmt.Errorf("read configuration: %w", err)
+	}
+	return v.ConfigFileUsed(), nil
 }

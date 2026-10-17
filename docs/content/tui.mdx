@@ -5,43 +5,296 @@ The plexctl Interactive Interface (TUI) provides a rich, full-screen experience 
 ## Navigation
 
 - **`Tab` / `Shift+Tab`**: Cycle through main tabs (Home, Libraries, History, etc.)
-- **`j` / `k` (or Arrows)**: Move cursor up and down.
+- **`j` / `k` (or Down/Up)**: Move down/up. Between Home poster rows, keep the same visible column, or select the nearest poster in a shorter row.
 - **`h` / `l` (or Arrows)**: Move through horizontal lists or scroll columns.
 - **`Enter`**: Select an item or view details.
+- **`V`** (uppercase): Switch a library between list and poster views.
 - **`Esc`**: Go back or close overlays.
 - **`q`**: Quit the application.
+
+Sessions, History, and Tasks use **j/k** to select the next/previous row and
+**h/l** to scroll columns left/right when the table is wider than the pane.
+The search Status page supports **hjkl** scrolling, including while indexing.
+Arrow keys work the same way. **Home / End** reach the top/bottom and
+**Page Up / Page Down** move by a page. **Shift+wheel** or a horizontal wheel
+scrolls tables and Status sideways.
+
+### Mouse
+
+Mouse support is enabled automatically, including inside tmux:
+
+- **Left click** a sidebar item, cover poster, table row, search result, or dialog
+  option to open it. The sidebar and footer actions are clickable too.
+- **Wheel** scrolls the view under the pointer: the sidebar, poster grid, Home
+  sections, tables, synopsis, season/episode lists, or an open dialog.
+- **Shift+wheel** or a horizontal wheel browses a Home poster row.
+- **Right click** goes back one level or closes the current dialog. Clicks outside
+  an open dialog do not activate the library behind it.
+- Hold **Shift** while selecting text to use the terminal's own selection.
+
+During suspended terminal playback, **left click** pauses/resumes, **wheel up/down** seeks
+forward/backward, and **right click** stops and returns to the library. These use
+mpv's Space, Right/Left, and q bindings, including any custom bindings you set.
 
 ## Global Shortcuts
 
 - **`u`**: Switch User (Plex Home).
 - **`p`**: Play selected item.
-- **`ctrl+p`**: Play selected item in TCT mode (terminal-based video rendering).
+- **`v`**: Choose a player: terminal/window for music; Automatic, Kitty, Sixel, or Text for video.
+- **`ctrl+p`**: Play music in the TUI or stream video with the saved terminal renderer.
 - **`/`**: Open global fuzzy search.
-- **`ctrl+l`**: Open library configuration (show/hide/icon picker).
+- **`Ctrl+H/J/K/L`**: Focus the pane to the left/down/up/right.
+- **`L`**: Open library configuration (show/hide/icon picker).
 - **`ctrl+s`**: Open global settings (theme/icon type).
 - **`r`**: Refresh current view / trigger reindex (on search page).
 - **`x`**: Stop current playback.
-- **`h`**: Jump directly to Home tab.
-- **`u`**: Switch User (Plex Home).
+- **`H`** (uppercase): Jump directly to Home tab. Lowercase **`h`** moves left within the current view.
 - **`?`**: Show help overlay.
+
+From the library, **Ctrl+H** reaches the left navigation; **Ctrl+L** returns
+from the sidebar to the library. Press **Ctrl+L** again to focus the alphabet rail.
+Use **j/k** or **Up/Down** in the sidebar, then **Enter** (or **l/Right**) to open
+the selected entry. The sidebar scrolls to keep the selection visible. Holding
+a pane shortcut stops at the edge instead of cycling through panes.
+
+While playing, **Ctrl+J** moves from the library to the player below, and
+**Ctrl+K** moves back up. In the player, **h/l** or **Left/Right** seek,
+**j/k** or **Down/Up** adjust volume, and **Enter** pauses/resumes. **Esc**
+returns focus to the library. The footer and highlighted border or bracketed
+letter identify the focused pane. Clicking a pane focuses it too. Dialogs retain
+their own input.
 
 ## Features
 
+### Friends Libraries
+
+Select your own server during setup. The **Friends Libraries → Browse** section
+in the left navigation automatically discovers servers shared with your current
+Plex account or Home profile. Select a friend to see the libraries they have
+granted you access to, then open a library to browse its posters or list.
+
+The usual controls work here: **Enter** for details, **V** to switch views,
+**g** or the alphabet rail to jump, and **p**, **Ctrl+P**, or **v** to play.
+Press **/** after choosing a friend to search all libraries available on that
+server. **Esc** returns to its libraries, then to the friends list. Your own
+library tabs and default server stay unchanged.
+
+Press **r** on the friends list to refresh after accepting a Plex library
+invitation. An unavailable server shows an error with retry controls. Only
+libraries shared with the current Plex user are listed; switching Home profiles
+refreshes this access. Plex Relay is tried when direct connections fail.
+
 ### Fuzzy Search
-Pressing `/` opens a global fuzzy search overlay. It searches across all indexed libraries for titles, actors, and directors. Results are updated instantly as you type.
+Press `/` to search artists, albums, tracks, movies, and TV. Local fuzzy matches
+appear immediately; Plex server results follow as you type. Server search covers
+the entire library, including artists you have not scrolled to, and works without
+building a local index. Track results include their artist and album so you can
+distinguish songs with the same name. Click a result or press Enter to open it.
+
+The optional local index also includes all music artists, albums, and tracks.
+Rebuild an existing index from Search → Status → `r`, or run
+`plexctl search reindex`, to make these available to `plexctl search find`.
 
 ### Library Configuration
-Pressing `ctrl+l` opens the configuration manager. Here you can:
+Pressing `L` opens the configuration manager. Here you can:
 - **Hide/Show** specific library sections.
 - **Assign Custom Icons** using Emojis, Nerd Fonts, or ASCII.
 - **Reorder** how libraries appear in your sidebar.
 
 ### Integrated Player
+
+Music libraries open **artists → albums → tracks**. Click an item or press
+**Enter** to browse, then press **`p`** to play the selected track. Playing an
+album queues the complete album in Plex's track order; playing an artist queues
+all their available tracks. The title and progress follow each track, and Plex
+receives each track's play progress and completion. Stopping playback or choosing
+another item cancels a queue that is still loading. **Esc** or right click returns
+to the previous browsing level.
+
+Artist pages include soundtracks and compilations where the artist contributes
+tracks, using Plex's section/artist queries. Queues and progress reporting retain
+the originating server and credentials, including Friends Libraries. Artist and
+album queue playback also works with `plexctl play <id>`.
+
+The artist page displays a grid of album covers with titles and years. Album
+art also appears beside the track list after selecting an album. It uses native
+high-resolution images in Kitty, Ghostty, and Sixel terminals, with text as a
+fallback, and resizes with the pane.
+Library scrolling loads additional artists automatically with either the mouse
+wheel or keyboard, in both poster and list views. A failed page can be retried
+with `r` without discarding the artists already loaded.
+
+Click the **A–Z rail** on the right, or press **`g` then a letter**, to jump through
+movies, TV shows, music artists, an artist's albums, or album tracks. **`#`** jumps
+to numbers and other characters. Plex sort titles are respected; accented Latin
+names share their base letter. Albums are alphabetical; tracks retain album order
+and jump by song title. The rail folds into columns in shorter panes.
+
+From the content pane, **Ctrl+L** focuses the rail at the current title's letter.
+Use **j/k** or **Down/Up** to move the bracketed selection, then **Enter** to jump
+and return focus to the content. **Home / End** select **# / Z** while the rail is
+focused. **Ctrl+H**, **h/Left**, or **Esc** returns without jumping. Moving the
+letter selection leaves the current title unchanged until you press **Enter**.
+
+Library jumps fetch missing pages automatically and show the loaded/total count.
+In the content pane, press **Esc** to cancel a pending jump, **Home** for the first
+item, **End** for the last item (loading remaining pages), or **Page Up / Page Down**
+to move by a page.
+Fetched pages stay available for subsequent jumps while the TUI is open.
+
+Music plays in the current TUI by default, without opening an mpv window, even
+when the file contains embedded cover art. You can keep browsing or searching
+while listening. Press **`v`** to choose **In this terminal** or **Separate player
+window**. **Ctrl+P** always chooses terminal music; **Ctrl+S → Music Player** saves
+the default (`music_player: terminal` or `window` in the configuration).
+
+The default visualizer is a live **stereo waveform**: cyan/azure and violet/rose
+traces with fading trails and stereo meters. The trace comes from the same mpv
+decoder playing the track, using an offscreen FFmpeg `showwaves` frame. Quiet
+signals get a square-root amplitude scale to keep their detail visible. Pause
+and silence settle the display; seeking follows the new audio position.
+
+Press **z** to switch to the 16-band spectrum with falling peaks, its mirrored
+style, compact controls, or back to the waveform. All styles use ordinary
+Unicode cells and terminal colors, including in tmux and over SSH, without
+Kitty/Sixel, desktop audio capture, or an extra player window. Audio plays on
+the host running mpv. The analysis uses stereo output; mpv downmixes multichannel music.
+
+| Control | Action |
+| --- | --- |
+| Space, or click the visualizer/title | Pause/resume |
+| `[` / `]` | Seek backward/forward 10 seconds |
+| Click the progress bar | Seek to that position |
+| Wheel over the player | Seek |
+| `+` / `-`, or Shift+wheel over the player | Adjust volume |
+| `m` | Mute/unmute |
+| `z` | Cycle waveform (default), spectrum, mirror, and compact controls |
+| `x` | Stop |
+
+The visualizer shrinks with the terminal and can be disabled under **Ctrl+S →
+Music Visualizer** (`music_visualizer: waveform`, `spectrum`, `mirror`, or `off`).
+The waveform requires mpv with Lua and FFmpeg/lavfi (`showwaves`); the spectrum
+requires its lavfi audio filters. Music playback remains available in minimal
+builds without visualization support. Terminal music stops when you quit the TUI.
+
+Music played in a separate mpv window has its own video visualizer. Choose
+**Ctrl+S → Music Video Visualizer**: **cqt**, **spectrum**, **waves**, **scope**, or
+**off**. This also applies when explicitly playing music through terminal video
+from the CLI. It requires the corresponding FFmpeg/lavfi filter in mpv. **z**
+continues to control the audio-only TUI visualizer.
+
 When playback is started, a playback bar appears at the bottom showing:
 - Current progress and duration.
 - Play/Pause status.
 - Media title.
-You can control the player directly from the TUI using `space` to pause/resume and `x` to stop.
+You can control the player directly from the TUI using `space` or clicking the
+player bar to pause/resume, and `x` or the footer's **Stop** action to stop.
+
+### Terminal Video
+
+Press **`v`** on a movie or episode to open the terminal playback menu. Select
+**Kitty graphics**, **Sixel graphics**, **Text**, or **Automatic**. The menu shows
+the detected terminal capabilities. **`ctrl+p`** uses the preference saved in
+Settings. By default playback takes over the current terminal or tmux pane; the library view returns when
+the video ends or you press **`q`**.
+
+Choose **Ctrl+S → Terminal Video Mode → Overlay** to draw video over the content
+pane while keeping the TUI active. The sidebar, settings, and player controls
+remain available. Use **Space** to pause, **[ / ]** to seek, **+ / -** for volume,
+**m** to mute, and **x** to stop. Dialogs temporarily hide video and closing them
+restores it, including paused frames. Quitting the TUI stops overlay playback.
+Overlay uses these TUI controls; the on-video controls below belong to suspend
+mode. CLI terminal playback always uses suspend mode.
+
+Kitty video has a control bar drawn into the image, with elapsed/total time,
+play/pause, **-10s / +10s**, a clickable and draggable timeline, volume,
+mute, subtitle visibility (**CC**), playback speed, and **Return**. The buttons
+and timeline follow the video when you resize the terminal, including through
+tmux and SSH. **Tab / Shift+Tab** select a button and **Enter** activates it.
+Press **`h`** to hide or show the controls. In Kitty, **Esc** also returns to the
+library and **+ / -** adjust volume. Scrolling over the volume controls adjusts
+volume; scrolling elsewhere seeks.
+
+In tmux, playback starts at the current pane size. Press **`f`** or click the
+**Fullscreen** button to zoom the pane. Press **`f`** again or click **Restore**
+to return to the split layout. Video and controls resize even while paused.
+Stopping playback restores the zoom state from before playback if you used
+the fullscreen control; an already zoomed pane stays zoomed when you return.
+
+During suspended playback, these shortcuts are available in every terminal renderer:
+
+- **`Space`** or **left click on the picture**: Pause or resume.
+- **`Left` / `Right`** or **wheel**: Seek backward or forward.
+- **`9` / `0`**: Decrease or increase volume.
+- **`m`**: Mute or unmute.
+- **`j`**: Cycle subtitle tracks.
+- **`f`**: Toggle fullscreen pane zoom in tmux.
+- **`q`** or **right click**: Stop and return to the library.
+
+The resume prompt, external subtitle tracks, and Plex watch progress also work
+with terminal playback. Use **x** for windowed or overlay playback and **q** for
+suspended playback.
+
+Choose **Terminal Video** in **`ctrl+s`** Settings:
+
+| Renderer | Behavior |
+| --- | --- |
+| `auto` (default) | Probe terminal graphics support and check mpv's compiled outputs; fall back to TCT. |
+| `kitty` | Use the Kitty graphics protocol. Requires a compatible terminal. |
+| `sixel` | Use Sixel graphics. Requires Sixel support enabled in the terminal. |
+| `tct` | Use mpv's true-color text renderer. |
+
+Auto detection queries the attached terminal, including through tmux. Kitty is
+preferred when supported, followed by Sixel, then TCT. If a terminal does not
+answer, known terminal environment variables are used outside multiplexers.
+Check your mpv build with **`mpv --vo=help`**. An explicitly selected renderer
+that is missing from mpv produces an error. If an automatically selected graphics
+output fails during startup, playback retries with Text and shows a notice.
+
+You can override the preference for a launch or play directly from the CLI:
+
+```bash
+plexctl tui --terminal-video kitty
+plexctl tui --terminal-video sixel
+plexctl tui --terminal-video-mode overlay --sixel-video-width 480
+plexctl play 12345 --terminal-video auto
+plexctl play 12345 --terminal-video sixel --no-resume
+```
+
+The preference is stored as `terminal_video` in `~/.plexctl.yaml` and can also be
+set with `PLEXCTL_TERMINAL_VIDEO`. Plain `p` on a video and `plexctl play 12345`
+open a video window. The existing `plexctl play 12345 --tct` explicitly selects TCT.
+
+Kitty output uses escape-code transport, so it does not require shared memory
+with the terminal when using SSH. With tmux 3.3+, plexctl temporarily enables
+graphics passthrough for its own pane. Suspended playback fits the current pane;
+fullscreen pane zoom is optional via **f**, with a matching button for Kitty.
+The prior zoom state and passthrough setting are restored on exit. Older mpv releases are supported by forwarding
+graphics and input through plexctl. GNU screen uses TCT in auto mode.
+Rendering speed and image quality depend on terminal size, connection speed,
+and mpv. Installing Kitty alone does not enable graphics in another emulator;
+launch plexctl (or attach tmux) from the Kitty application.
+See [mpv's video output documentation](https://mpv.io/manual/stable/#video-output-drivers)
+for terminal requirements and configuration.
+
+Sixel video defaults to a centered **640-pixel width cap** to reduce frame cost
+on wide terminals. Change **Ctrl+S → Sixel Video Width**, use
+`--sixel-video-width 480`, or set it to **0** for automatic sizing. Overlay mode
+uses the content pane's dimensions and does not zoom tmux panes.
+
+### High-resolution cover posters
+
+Poster selection is automatic: Kitty Unicode placeholders in **Kitty 0.28+**
+and **Ghostty**, then **Sixel** if the terminal advertises it, then half-cell
+text. Movie/TV posters and album covers keep their proportions, including square
+album art. Kitty retains up to 768 pixels on the longest side and bounds live
+terminal images; Sixel fits the actual cells and crops at viewport edges.
+
+Posters work in grids and details, with clipping, repeated covers, dialog redraws,
+and restoration after terminal playback. tmux graphics use passthrough. Choose
+**Ctrl+S → Poster Renderer** or `--poster-renderer` to force `kitty`, `sixel`, or
+`halfcell`. Return to `auto` for capability-based selection. Sixel must be enabled
+in the terminal; a forced protocol still requires terminal support.
 
 ### User Switching (Plex Home)
 Pressing `u` opens the "Who's watching?" profile picker. This allows you to switch between managed users in your Plex Home.

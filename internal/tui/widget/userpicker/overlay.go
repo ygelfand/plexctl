@@ -33,6 +33,19 @@ func (m *UserPickerOverlayModel) Init() tea.Cmd {
 
 func (m *UserPickerOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		if m.enteringPin {
+			return m, nil
+		}
+		if delta := ui.WheelDelta(msg); delta != 0 {
+			m.cursor = max(0, min(len(m.users)-1, m.cursor+delta))
+		} else if ui.LeftClick(msg) {
+			row := msg.Y - 4 // Border, padding, and the two-line title.
+			if row >= 0 && row < len(m.users) {
+				m.cursor = row
+				return m.Update(ui.KeyPress("enter"))
+			}
+		}
 	case ui.InvalidPinMsg:
 		m.showInvalid = true
 		m.pinInput = ""
@@ -87,6 +100,9 @@ func (m *UserPickerOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor++
 			}
 		case "enter":
+			if len(m.users) == 0 {
+				return m, nil
+			}
 			user := m.users[m.cursor]
 			if user.Protected {
 				m.enteringPin = true

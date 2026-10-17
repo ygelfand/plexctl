@@ -34,7 +34,7 @@ func (p *HomeUsersPresenter) Rows() [][]string {
 	return rows
 }
 
-func (p *HomeUsersPresenter) Raw() interface{} {
+func (p *HomeUsersPresenter) Raw() any {
 	return p.Users
 }
 
@@ -91,7 +91,7 @@ func (p *UsersPresenter) Rows() [][]string {
 	return rows
 }
 
-func (p *UsersPresenter) Raw() interface{} {
+func (p *UsersPresenter) Raw() any {
 	return p.Users
 }
 

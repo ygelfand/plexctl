@@ -2,6 +2,7 @@ package view
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/LukeHagar/plexgo/models/components"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -20,6 +21,8 @@ type HomeView struct {
 	activeList int
 	theme      tint.Tint
 	loading    bool
+	err        error
+	request    viewRequest
 
 	details  detail.DetailManager
 	viewport viewport.Model
@@ -27,16 +30,34 @@ type HomeView struct {
 
 func NewHomeView(theme tint.Tint) *HomeView {
 	return &HomeView{
+		request:  newViewRequest(),
 		theme:    theme,
 		loading:  true,
 		viewport: viewport.New(0, 0),
 	}
 }
 
-type homeHubsMsg []components.Hub
+func (v *HomeView) CanJumpLetters() bool {
+	target, ok := v.details.View.(ui.LetterJumper)
+	return ok && target.CanJumpLetters()
+}
+
+func (v *HomeView) AlphabetRail() *ui.AlphabetRail {
+	if target, ok := v.details.View.(ui.AlphabetNavigator); ok {
+		return target.AlphabetRail()
+	}
+	return nil
+}
+
+func (v *HomeView) JumpToLetter(letter string) tea.Cmd {
+	if target, ok := v.details.View.(ui.LetterJumper); ok {
+		return target.JumpToLetter(letter)
+	}
+	return nil
+}
 
 func (v *HomeView) Init() tea.Cmd {
-	return v.fetchHubs
+	return v.Refresh()
 }
 
 func (v *HomeView) Refresh() tea.Cmd {
@@ -46,19 +67,23 @@ func (v *HomeView) Refresh() tea.Cmd {
 		}
 	}
 	v.loading = true
-	return v.fetchHubs
-}
-
-func (v *HomeView) fetchHubs() tea.Msg {
-	hubs, err := plex.GetHomeHubs(context.Background())
-	if err != nil {
-		return err
-	}
-	return homeHubsMsg(hubs)
+	v.err = nil
+	return v.request.start(v, func(ctx context.Context) (any, error) {
+		return plex.GetHomeHubs(ctx)
+	})
 }
 
 func (v *HomeView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if v.details.Active() {
+	if result, ok := msg.(DataLoadedMsg); ok && !v.request.accepts(v, result) {
+		return v, nil
+	}
+	if posterMsg, ok := msg.(poster.PosterLoadedMsg); ok && v.details.Active() {
+		for _, list := range v.lists {
+			list.Update(posterMsg)
+		}
+	}
+	_, homeResult := msg.(DataLoadedMsg)
+	if v.details.Active() && !homeResult {
 		cmd, handled := v.details.Update(msg)
 		if handled {
 			return v, cmd
@@ -69,6 +94,29 @@ func (v *HomeView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	shouldRedraw := false
 
 	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		if delta := ui.WheelDelta(msg); delta != 0 && !msg.Shift &&
+			msg.Button != tea.MouseButtonWheelLeft && msg.Button != tea.MouseButtonWheelRight {
+			v.viewport.SetYOffset(v.viewport.YOffset + delta*3)
+			return v, nil
+		}
+		y := -v.viewport.YOffset
+		for i, l := range v.lists {
+			height := lipgloss.Height(l.View())
+			local, inside := (ui.Rect{Y: y, Width: v.viewport.Width, Height: height}).Local(msg)
+			if inside {
+				if ui.LeftClick(msg) || ui.WheelDelta(msg) != 0 {
+					v.lists[v.activeList].Active = false
+					v.activeList = i
+					l.Active = true
+				}
+				_, cmd := l.Update(local)
+				v.updateViewportContent()
+				return v, cmd
+			}
+			y += height
+		}
+		return v, nil
 	case tea.WindowSizeMsg:
 		layout := ui.GetLayout()
 		v.viewport.Width = layout.InnerWidth()
@@ -80,9 +128,13 @@ func (v *HomeView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			l.Theme = msg.Theme
 		}
 		shouldRedraw = true
-	case homeHubsMsg:
+	case DataLoadedMsg:
 		v.loading = false
-		v.hubs = msg
+		v.err = msg.err
+		if msg.err != nil {
+			return v, nil
+		}
+		v.hubs = msg.data.([]components.Hub)
 
 		var newLists []*poster.PosterList
 		for i, hub := range v.hubs {
@@ -105,7 +157,7 @@ func (v *HomeView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cmds = append(cmds, existing.SetItems(hub.Metadata))
 					newLists = append(newLists, existing)
 				} else {
-					l := poster.NewPosterList(i, title, hub.Metadata, v.theme)
+					l := poster.NewPosterList(i, title, hub.Metadata, v.theme, v.request.server)
 					newLists = append(newLists, l)
 					cmds = append(cmds, l.Init())
 				}
@@ -137,11 +189,13 @@ func (v *HomeView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var dv tea.Model
 		switch meta.Type {
 		case "show":
-			dv = detail.NewShowDetailView(ratingKey, v.theme)
+			dv = detail.NewShowDetailView(ratingKey, v.theme, v.request.server)
 		case "episode":
-			dv = detail.NewEpisodeDetailView(ratingKey, v.theme)
+			dv = detail.NewEpisodeDetailView(ratingKey, v.theme, v.request.server)
+		case "artist", "album", "track":
+			dv = detail.NewMusicDetailView(ratingKey, v.theme, v.request.server)
 		default:
-			dv = detail.NewMovieDetailView(ratingKey, v.theme)
+			dv = detail.NewMovieDetailView(ratingKey, v.theme, v.request.server)
 		}
 
 		layout := ui.GetLayout()
@@ -154,21 +208,11 @@ func (v *HomeView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "up", "k":
-			if v.activeList > 0 {
-				v.lists[v.activeList].Active = false
-				v.activeList--
-				v.lists[v.activeList].Active = true
-				v.syncViewport()
-				shouldRedraw = true
-			}
+			cmds = append(cmds, v.moveList(-1))
+			shouldRedraw = true
 		case "down", "j":
-			if v.activeList < len(v.lists)-1 {
-				v.lists[v.activeList].Active = false
-				v.activeList++
-				v.lists[v.activeList].Active = true
-				v.syncViewport()
-				shouldRedraw = true
-			}
+			cmds = append(cmds, v.moveList(1))
+			shouldRedraw = true
 		case "left", "h", "right", "l":
 			shouldRedraw = true
 		case "r":
@@ -190,8 +234,31 @@ func (v *HomeView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return v, tea.Batch(cmds...)
 }
 
+func (v *HomeView) moveList(delta int) tea.Cmd {
+	next := v.activeList + delta
+	if next < 0 || next >= len(v.lists) {
+		return nil
+	}
+
+	current := v.lists[v.activeList]
+	column := current.Cursor - current.Offset
+	current.Active = false
+	v.activeList = next
+	target := v.lists[next]
+	target.Active = true
+	// Each row scrolls independently. Follow the visible column, clamping to
+	// the nearest poster when the destination row has fewer items.
+	target.Cursor = min(target.Offset+column, len(target.Items)-1)
+	cmd := target.Sync()
+	v.syncViewport()
+	return cmd
+}
+
 func (v *HomeView) syncViewport() {
-	targetLine := v.activeList * (ui.PosterTotalHeight + 1)
+	targetLine := 0
+	for i := 0; i < v.activeList; i++ {
+		targetLine += lipgloss.Height(v.lists[i].View())
+	}
 	v.viewport.SetYOffset(targetLine)
 }
 
@@ -231,6 +298,9 @@ func (v *HomeView) View() string {
 	if v.loading {
 		return "\n  ⌛ Loading Dashboard..."
 	}
+	if v.err != nil {
+		return fmt.Sprintf("Unable to load dashboard: %v\n[r] Retry", v.err)
+	}
 	if len(v.lists) == 0 {
 		return "\n  No promoted hubs found."
 	}
@@ -240,6 +310,13 @@ func (v *HomeView) View() string {
 		Render(v.viewport.View())
 }
 
+func (v *HomeView) ActionRows() int {
+	if v.details.Active() {
+		return 1
+	}
+	return 0
+}
+
 func (v *HomeView) HelpKeys() []ui.HelpKey {
 	if v.details.Active() {
 		if provider, ok := v.details.View.(ui.HelpProvider); ok {
@@ -247,8 +324,8 @@ func (v *HomeView) HelpKeys() []ui.HelpKey {
 		}
 	}
 	return []ui.HelpKey{
-		{Key: "↑/↓", Desc: "Switch Section"},
-		{Key: "←/→", Desc: "Browse Items"},
+		{Key: "j/k, ↓/↑", Desc: "Switch rows in the same column"},
+		{Key: "h/l, ←/→", Desc: "Browse Items"},
 		{Key: "enter", Desc: "View Details"},
 	}
 }

@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/LukeHagar/plexgo/models/components"
 	"github.com/LukeHagar/plexgo/models/operations"
 	"github.com/ygelfand/plexctl/internal/cache"
 	"github.com/ygelfand/plexctl/internal/config"
@@ -20,6 +23,8 @@ type IndexEntry struct {
 	Type      string `json:"type"`
 	SectionID string `json:"sectionId"`
 	Library   string `json:"library"`
+	Artist    string `json:"artist,omitempty"`
+	Album     string `json:"album,omitempty"`
 	// Additional searchable fields
 	OriginalTitle string   `json:"originalTitle,omitempty"`
 	Summary       string   `json:"summary,omitempty"`
@@ -32,30 +37,64 @@ type SearchIndex struct {
 	LastIndexed time.Time    `json:"lastIndexed"`
 	Entries     []IndexEntry `json:"entries"`
 	mu          sync.RWMutex
+	reindexMu   sync.Mutex
+	scopeOnce   sync.Once
+	server      config.ServerTarget
+	cacheDir    string
+}
+
+// SearchableText includes music context, so an album or track can also be found
+// by artist. Titles remain first for the fuzzy matcher's ranking.
+func (e IndexEntry) SearchableText() string {
+	return strings.Join([]string{e.Title, e.Artist, e.Album, e.OriginalTitle,
+		strings.Join(e.Cast, " "), strings.Join(e.Directors, " ")}, " ")
+}
+
+func (e IndexEntry) Description() string {
+	parts := []string{strings.ToUpper(e.Type)}
+	for _, part := range []string{e.Artist, e.Album, e.Library} {
+		if part != "" && part != e.Title {
+			parts = append(parts, part)
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+// Snapshot returns an immutable view of the last completed index.
+func (idx *SearchIndex) Snapshot() ([]IndexEntry, time.Time) {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	return slices.Clone(idx.Entries), idx.LastIndexed
 }
 
 var (
-	indexInstance *SearchIndex
-	indexOnce     sync.Once
+	indexInstance  *SearchIndex
+	indexMu        sync.Mutex
+	indexNamespace string
 )
 
 func GetIndex() *SearchIndex {
-	indexOnce.Do(func() {
+	indexMu.Lock()
+	defer indexMu.Unlock()
+	cfg := config.Get()
+	namespace := cfg.MediaCacheNamespace()
+	if indexInstance == nil || indexNamespace != namespace || indexInstance.cacheDir != cfg.CacheDir {
 		indexInstance = &SearchIndex{}
+		indexInstance.bindScope()
+		indexNamespace = namespace
 		_ = indexInstance.Load()
-	})
+	}
 	return indexInstance
 }
 
 func (idx *SearchIndex) Load() error {
-	cfg := config.Get()
-	cm, err := cache.Get(cfg.CacheDir)
+	idx.bindScope()
+	cm, err := cache.Get(idx.cacheDir)
 	if err != nil {
 		return err
 	}
 
-	serverID, _, _ := cfg.GetActiveServer()
-	key := fmt.Sprintf("%s/search_index", serverID)
+	key := fmt.Sprintf("%s/search_index", idx.server.CacheNamespace())
 
 	var data SearchIndex
 	if err := cm.Get(key, &data); err == nil {
@@ -69,18 +108,26 @@ func (idx *SearchIndex) Load() error {
 }
 
 func (idx *SearchIndex) Save() error {
-	cfg := config.Get()
-	cm, err := cache.Get(cfg.CacheDir)
+	idx.bindScope()
+	cm, err := cache.Get(idx.cacheDir)
 	if err != nil {
 		return err
 	}
 
-	serverID, _, _ := cfg.GetActiveServer()
-	key := fmt.Sprintf("%s/search_index", serverID)
+	key := fmt.Sprintf("%s/search_index", idx.server.CacheNamespace())
 
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	return cm.Set(key, idx, 0)
+}
+
+// An index retains the identity it was created for, including when a Home
+// profile switch happens while a background reindex is still running.
+func (idx *SearchIndex) bindScope() {
+	idx.scopeOnce.Do(func() {
+		cfg := config.Get()
+		idx.server, idx.cacheDir = cfg.ServerTarget(), cfg.CacheDir
+	})
 }
 
 type IndexProgress struct {
@@ -90,7 +137,11 @@ type IndexProgress struct {
 }
 
 func (idx *SearchIndex) Reindex(ctx context.Context, progress chan<- IndexProgress) error {
-	client, err := plex.NewClient()
+	idx.bindScope()
+	idx.reindexMu.Lock()
+	defer idx.reindexMu.Unlock()
+	ctx = idx.server.Context(ctx)
+	client, err := plex.NewClientForContext(ctx)
 	if err != nil {
 		return err
 	}
@@ -114,16 +165,15 @@ func (idx *SearchIndex) Reindex(ctx context.Context, progress chan<- IndexProgre
 		}
 
 		slog.Debug("SearchIndex: indexing library", "title", *lib.Title, "index", i+1, "total", totalLibs)
-		progress <- IndexProgress{
+		notifyProgress(progress, IndexProgress{
 			Current: i + 1,
 			Total:   totalLibs,
 			Message: fmt.Sprintf("Indexing %s...", *lib.Title),
-		}
+		})
 
 		entries, err := idx.indexLibrary(ctx, client, *lib.Key, *lib.Title, i+1, totalLibs, progress)
 		if err != nil {
-			slog.Error("SearchIndex: failed to index library", "library", *lib.Title, "error", err)
-			continue
+			return fmt.Errorf("index %s: %w", *lib.Title, err)
 		}
 		newEntries = append(newEntries, entries...)
 	}
@@ -134,11 +184,11 @@ func (idx *SearchIndex) Reindex(ctx context.Context, progress chan<- IndexProgre
 	idx.mu.Unlock()
 
 	slog.Debug("SearchIndex: reindex complete", "total_entries", len(newEntries))
-	progress <- IndexProgress{
+	notifyProgress(progress, IndexProgress{
 		Current: totalLibs,
 		Total:   totalLibs,
 		Message: "Finalizing...",
-	}
+	})
 
 	return idx.Save()
 }
@@ -147,6 +197,7 @@ func (idx *SearchIndex) indexLibrary(ctx context.Context, client *plex.Client, s
 	var entries []IndexEntry
 	start := 0
 	size := 100
+	music := false
 
 	for {
 		slog.Log(context.Background(), config.LevelTrace, "SearchIndex: fetching page", "library", libTitle, "start", start, "size", size)
@@ -161,7 +212,7 @@ func (idx *SearchIndex) indexLibrary(ctx context.Context, client *plex.Client, s
 		}
 
 		if res.MediaContainerWithMetadata == nil || res.MediaContainerWithMetadata.MediaContainer == nil {
-			break
+			return nil, fmt.Errorf("missing library metadata")
 		}
 
 		mc := res.MediaContainerWithMetadata.MediaContainer
@@ -179,39 +230,24 @@ func (idx *SearchIndex) indexLibrary(ctx context.Context, client *plex.Client, s
 
 		for j, meta := range metadata {
 			currentPos := start + j + 1
-			progress <- IndexProgress{
+			notifyProgress(progress, IndexProgress{
 				Current: libIdx,
 				Total:   libTotal,
 				Message: fmt.Sprintf("%s: %d/%d", libTitle, currentPos, totalInLib),
-			}
+			})
 
-			entry := IndexEntry{
-				RatingKey: ui.PtrToString(meta.RatingKey),
-				Title:     meta.Title,
-				Type:      meta.Type,
-				SectionID: sectionID,
-				Library:   libTitle,
-				Summary:   ui.PtrToString(meta.Summary),
-			}
-			if meta.OriginalTitle != nil {
-				entry.OriginalTitle = *meta.OriginalTitle
-			}
-			if meta.Year != nil {
-				entry.Year = int(*meta.Year)
-			}
-
-			for _, r := range meta.Role {
-				entry.Cast = append(entry.Cast, r.Tag)
-			}
-			for _, d := range meta.Director {
-				entry.Directors = append(entry.Directors, d.Tag)
-			}
-
-			entries = append(entries, entry)
+			entries = append(entries, entryFromMetadata(meta, sectionID, libTitle))
+			music = music || meta.Type == "artist"
 
 			if meta.Type == "show" && meta.RatingKey != nil {
-				seasons, _ := plex.GetChildren(ctx, *meta.RatingKey)
+				seasons, err := plex.GetChildren(ctx, *meta.RatingKey)
+				if err != nil {
+					return nil, err
+				}
 				for _, season := range seasons {
+					if season.RatingKey == nil || *season.RatingKey == "" {
+						return nil, fmt.Errorf("season in show %s has no rating key", *meta.RatingKey)
+					}
 					entries = append(entries, IndexEntry{
 						RatingKey: ui.PtrToString(season.RatingKey),
 						Title:     fmt.Sprintf("%s - %s", meta.Title, season.Title),
@@ -220,7 +256,10 @@ func (idx *SearchIndex) indexLibrary(ctx context.Context, client *plex.Client, s
 						Library:   libTitle,
 					})
 
-					episodes, _ := plex.GetChildren(ctx, *season.RatingKey)
+					episodes, err := plex.GetChildren(ctx, *season.RatingKey)
+					if err != nil {
+						return nil, err
+					}
 					for _, ep := range episodes {
 						epEntry := IndexEntry{
 							RatingKey: ui.PtrToString(ep.RatingKey),
@@ -239,11 +278,76 @@ func (idx *SearchIndex) indexLibrary(ctx context.Context, client *plex.Client, s
 			}
 		}
 
-		start += size
+		start += len(metadata)
 		if mc.TotalSize != nil && int64(start) >= *mc.TotalSize {
 			break
 		}
 	}
 
+	if music {
+		// Plex's actual library type IDs are album=9 and track=10. The pinned
+		// SDK's enum uses incorrect music IDs; explicitly use the wire values.
+		for _, mediaType := range []components.MediaType{9, 10} {
+			for start := 0; ; {
+				res, err := client.SDK.Content.ListContent(ctx, operations.ListContentRequest{
+					SectionID: sectionID, XPlexContainerStart: ui.Ptr(start), XPlexContainerSize: ui.Ptr(size),
+					MediaQuery: &components.MediaQuery{Type: &mediaType},
+				})
+				if err != nil {
+					return nil, err
+				}
+				if res.MediaContainerWithMetadata == nil || res.MediaContainerWithMetadata.MediaContainer == nil {
+					return nil, fmt.Errorf("missing music metadata")
+				}
+				mc := res.MediaContainerWithMetadata.MediaContainer
+				if len(mc.Metadata) == 0 {
+					break
+				}
+				for _, meta := range mc.Metadata {
+					entries = append(entries, entryFromMetadata(meta, sectionID, libTitle))
+				}
+				start += len(mc.Metadata)
+				notifyProgress(progress, IndexProgress{Current: libIdx, Total: libTotal,
+					Message: fmt.Sprintf("%s: %d music entries", libTitle, len(entries))})
+				if mc.TotalSize != nil && int64(start) >= *mc.TotalSize {
+					break
+				}
+			}
+		}
+	}
+
 	return entries, nil
+}
+
+func notifyProgress(progress chan<- IndexProgress, update IndexProgress) {
+	// A hidden status tab must not block indexing. Progress is informational.
+	select {
+	case progress <- update:
+	default:
+	}
+}
+
+func entryFromMetadata(meta components.Metadata, sectionID, library string) IndexEntry {
+	entry := IndexEntry{
+		RatingKey: ui.PtrToString(meta.RatingKey), Title: meta.Title, Type: meta.Type,
+		SectionID: sectionID, Library: library, Summary: ui.PtrToString(meta.Summary),
+		OriginalTitle: ui.PtrToString(meta.OriginalTitle),
+	}
+	if meta.Year != nil {
+		entry.Year = int(*meta.Year)
+	}
+	switch meta.Type {
+	case "album":
+		entry.Artist = ui.PtrToString(meta.ParentTitle)
+	case "track":
+		entry.Artist = ui.PtrToString(meta.GrandparentTitle)
+		entry.Album = ui.PtrToString(meta.ParentTitle)
+	}
+	for _, role := range meta.Role {
+		entry.Cast = append(entry.Cast, role.Tag)
+	}
+	for _, director := range meta.Director {
+		entry.Directors = append(entry.Directors, director.Tag)
+	}
+	return entry
 }

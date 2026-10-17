@@ -15,6 +15,7 @@ plexctl is designed for users who want a powerful, terminal-based way to interac
 ## Key Features
 
 - **🚀 Interactive TUI**: Navigate libraries, browse media, and manage sessions in a full-screen terminal app.
+- **Friends Libraries**: Browse and search your friends' shared libraries from the left sidebar while keeping your own server selected.
 - **🔍 Fuzzy Search**: Instantly find movies, shows, or episodes with global fuzzy search.
 - **🎬 Integrated Playback**: Launch media directly in `mpv` with full control.
 - **⚙️ Deep Configuration**: Manage library visibility, custom icons, and theme preferences.
@@ -50,10 +51,25 @@ go install github.com/ygelfand/plexctl@latest
 
 ### Prerequisites
 
-You must have **mpv** installed for media playback:
+**mpv** is required for media playback. Before starting the TUI or a player,
+plexctl checks for missing or outdated mpv and offers installation with your
+approval. You can also run `plexctl mpv` or `plexctl mpv install` explicitly.
+On Debian/Ubuntu, an outdated apt candidate triggers an offer to build the latest
+stable release from source. The pre-check shows required and missing development
+packages, including Meson from apt, FFmpeg, libass, Lua, and libsixel. Dependency
+installation and compilation require your approval. A compatible libplacebo is
+used from apt or built as a static Meson subproject. The build enables Sixel and
+Lua and verifies the video outputs before activation.
+
+Source builds install under `~/.local/opt/plexctl-mpv-<version>-<build-id>` and activate
+through `~/.local/bin/mpv`, preserving the previous file or symlink. Put
+`~/.local/bin` first on PATH for future shells; plexctl prints instructions when
+needed. Logs and sources stay in the plexctl cache. Other package managers verify
+the version after installation. For installation outside this setup flow:
 
 - **macOS**: `brew install mpv`
-- **Linux**: `sudo apt install mpv` or `sudo pacman -S mpv`
+- **Debian/Ubuntu**: `plexctl mpv install` (builds from source when apt is too old)
+- **Other Linux**: Use your package manager, such as `sudo pacman -S mpv`
 - **Windows**: Download from [mpv.io](https://mpv.io/)
 
 ### Usage

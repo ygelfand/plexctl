@@ -84,15 +84,7 @@ var tasksStartCmd = &cobra.Command{
 				slog.Error("SDK: Failed to get tasks for selection", "error", err)
 				return err
 			}
-			var options []struct{ Title, Desc, Value string }
-			for _, t := range res.Object.ButlerTasks.ButlerTask {
-				options = append(options, struct{ Title, Desc, Value string }{
-					Title: *t.Title,
-					Desc:  *t.Description,
-					Value: *t.Name,
-				})
-			}
-			taskName, err = ui.SelectOption("Select a task to start", options)
+			taskName, err = ui.SelectOption("Select a task to start", taskOptions(res))
 			if err != nil {
 				return err
 			}
@@ -127,15 +119,7 @@ var tasksStopCmd = &cobra.Command{
 				slog.Error("SDK: Failed to get tasks for stop selection", "error", err)
 				return err
 			}
-			var options []struct{ Title, Desc, Value string }
-			for _, t := range res.Object.ButlerTasks.ButlerTask {
-				options = append(options, struct{ Title, Desc, Value string }{
-					Title: *t.Title,
-					Desc:  *t.Description,
-					Value: *t.Name,
-				})
-			}
-			taskName, err = ui.SelectOption("Select a task to stop", options)
+			taskName, err = ui.SelectOption("Select a task to stop", taskOptions(res))
 			if err != nil {
 				return err
 			}
@@ -153,6 +137,28 @@ var tasksStopCmd = &cobra.Command{
 		fmt.Printf("Task %s stopped.\n", taskName)
 		return nil
 	}),
+}
+
+// taskOptions accepts sparse Plex responses and never offers an unusable task ID.
+func taskOptions(res *operations.GetTasksResponse) []struct{ Title, Desc, Value string } {
+	if res == nil || res.Object == nil || res.Object.ButlerTasks == nil {
+		return nil
+	}
+	var options []struct{ Title, Desc, Value string }
+	for _, task := range res.Object.ButlerTasks.ButlerTask {
+		name := ui.PtrToString(task.Name)
+		if name == "" {
+			continue
+		}
+		title := ui.PtrToString(task.Title)
+		if title == "" {
+			title = name
+		}
+		options = append(options, struct{ Title, Desc, Value string }{
+			Title: title, Desc: ui.PtrToString(task.Description), Value: name,
+		})
+	}
+	return options
 }
 
 func init() {

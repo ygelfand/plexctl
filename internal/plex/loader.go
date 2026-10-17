@@ -35,42 +35,50 @@ const (
 
 // LoadData performs the initial data fetch and caching.
 // It sends progress updates through the provided channel.
-func LoadData(ctx context.Context, updates chan<- interface{}) {
-	sendUpdate := func(p float64, msg string) {
-		if updates != nil {
-			updates <- ProgressUpdate{Percent: p, Message: msg}
+func LoadData(ctx context.Context, updates chan<- any) {
+	send := func(msg any) {
+		if updates == nil {
+			return
 		}
+		select {
+		case updates <- msg:
+		case <-ctx.Done():
+		}
+	}
+	sendUpdate := func(p float64, msg string) {
+		send(ProgressUpdate{Percent: p, Message: msg})
 	}
 
 	cfg := config.Get()
-	serverID, _, ok := cfg.GetActiveServer()
-	if !ok {
+	server := config.ServerFromContext(ctx)
+	ctx = server.Context(ctx)
+	if server.ID == "" || server.URL == "" {
 		slog.Error("Loader: No active server configured")
-		updates <- fmt.Errorf("no active server configured")
+		send(fmt.Errorf("no active server configured"))
 		return
 	}
 
 	cm, err := cache.Get(cfg.CacheDir)
 	if err != nil {
 		slog.Error("Loader: Failed to get cache manager", "error", err)
-		updates <- err
+		send(err)
 		return
 	}
 
 	sendUpdate(0.1, "Connecting to Plex...")
 	slog.Debug("Loader: Initializing Plex client")
-	client, err := NewClient()
+	client, err := NewClientForContext(ctx)
 	if err != nil {
 		slog.Error("Loader: Client initialization failed", "error", err)
-		updates <- err
+		send(err)
 		return
 	}
 
 	// 1. Get libraries list (Sections)
 	sendUpdate(0.2, "Fetching libraries list...")
-	slog.Debug("Loader: Fetching sections from server", "server_id", serverID)
+	slog.Debug("Loader: Fetching sections from server", "server_id", server.ID)
 	var sectionsBody operations.GetSectionsResponseBody
-	err = cache.AutoCache(cm, serverID, nil, LibraryCacheTTL, &sectionsBody, func() (*operations.GetSectionsResponseBody, error) {
+	err = cache.AutoCache(cm, server.CacheNamespace(), nil, LibraryCacheTTL, &sectionsBody, func() (*operations.GetSectionsResponseBody, error) {
 		slog.Log(context.Background(), config.LevelTrace, "Loader: Sections Cache MISS, calling SDK")
 		res, err := client.SDK.Library.GetSections(ctx)
 		if err != nil {
@@ -84,13 +92,13 @@ func LoadData(ctx context.Context, updates chan<- interface{}) {
 
 	if err != nil {
 		slog.Error("Loader: Failed to get sections", "error", err)
-		updates <- err
+		send(err)
 		return
 	}
 
 	if sectionsBody.MediaContainer == nil {
 		slog.Error("Loader: No libraries found on server")
-		updates <- fmt.Errorf("no libraries found on server")
+		send(fmt.Errorf("no libraries found on server"))
 		return
 	}
 
@@ -100,6 +108,9 @@ func LoadData(ctx context.Context, updates chan<- interface{}) {
 	libraries := make([]LibraryInfo, 0, total)
 
 	for i, dir := range dirs {
+		if ctx.Err() != nil {
+			return
+		}
 		key := ui.PtrToString(dir.Key)
 		title := ui.PtrToString(dir.Title)
 
@@ -110,7 +121,7 @@ func LoadData(ctx context.Context, updates chan<- interface{}) {
 
 		var libInfo LibraryInfo
 		req := operations.ListContentRequest{SectionID: key}
-		err = cache.AutoCache(cm, serverID, req, LibraryCacheTTL, &libInfo, func() (*LibraryInfo, error) {
+		err = cache.AutoCache(cm, server.CacheNamespace(), req, LibraryCacheTTL, &libInfo, func() (*LibraryInfo, error) {
 			slog.Log(context.Background(), config.LevelTrace, "Loader: Content Cache MISS", "library", title)
 			count := 0
 			contentRes, err := client.SDK.Content.ListContent(ctx, req)
@@ -145,8 +156,8 @@ func LoadData(ctx context.Context, updates chan<- interface{}) {
 	slog.Info("Loader: Initialization complete", "libraries", len(libraries))
 
 	sendUpdate(1.0, "Initialization complete!")
-	updates <- LoaderResult{
-		ServerID:  serverID,
+	send(LoaderResult{
+		ServerID:  server.ID,
 		Libraries: libraries,
-	}
+	})
 }

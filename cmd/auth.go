@@ -2,14 +2,12 @@ package cmd
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/BrenekH/go-plexauth"
-	"github.com/LukeHagar/plexgo/models/operations"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
+	"github.com/ygelfand/plexctl/internal/commands"
 	"github.com/ygelfand/plexctl/internal/config"
-	"github.com/ygelfand/plexctl/internal/plex"
 	"github.com/ygelfand/plexctl/internal/ui"
 )
 
@@ -59,78 +57,13 @@ var loginCmd = &cobra.Command{
 		cfg.Token = token
 		ui.RenderSuccess("Successfully authenticated!")
 
-		// Discover servers
-		fmt.Println("\nDiscovering available servers...")
-		client, err := plex.NewClient()
-		if err != nil {
-			return fmt.Errorf("failed to initialize client for discovery: %w", err)
-		}
-
-		res, err := client.SDK.Plex.GetServerResources(cmd.Context(), operations.GetServerResourcesRequest{
-			IncludeHTTPS: operations.IncludeHTTPSTrue.ToPointer(),
-			IncludeIPv6:  operations.IncludeIPv6True.ToPointer(),
-			IncludeRelay: operations.IncludeRelayTrue.ToPointer(),
-		})
-		if err != nil {
-			return fmt.Errorf("failed to discover servers: %w", err)
-		}
-
-		var options []struct{ Title, Desc, Value, ID string }
-		for _, device := range res.PlexDevices {
-			if strings.Contains(device.Provides, "server") {
-				for _, conn := range device.Connections {
-					if !conn.Relay {
-						desc := conn.URI
-						if conn.Local {
-							desc += " (Local)"
-						}
-						options = append(options, struct{ Title, Desc, Value, ID string }{
-							Title: device.Name,
-							Desc:  desc,
-							Value: conn.URI,
-							ID:    device.ClientIdentifier,
-						})
-					}
-				}
-			}
-		}
-
-		if len(options) == 0 {
-			cfg.Logger.Warn("No servers discovered on plex.tv")
-		} else if len(options) == 1 {
-			opt := options[0]
-			cfg.AddServer(opt.ID, config.Server{Name: opt.Title, URL: opt.Value}, true)
-			fmt.Printf("Auto-selected only available server: %s (%s)\n", opt.Title, opt.Value)
-		} else {
-			var uiOptions []struct{ Title, Desc, Value string }
-			for _, o := range options {
-				uiOptions = append(uiOptions, struct{ Title, Desc, Value string }{
-					Title: o.Title,
-					Desc:  o.Desc,
-					Value: o.Value,
-				})
-			}
-
-			choice, err := ui.SelectOption("Select a Plex Server to use", uiOptions)
-			if err != nil {
-				return fmt.Errorf("failed to select server: %w", err)
-			}
-
-			var selectedID, selectedName string
-			for _, opt := range options {
-				if opt.Value == choice {
-					selectedID = opt.ID
-					selectedName = opt.Title
-					break
-				}
-			}
-
-			cfg.AddServer(selectedID, config.Server{Name: selectedName, URL: choice}, true)
-			fmt.Printf("Selected server: %s (%s)\n", selectedName, choice)
-		}
-
+		cfg.HomeUser = config.HomeUser{}
 		if err := cfg.Save(); err != nil {
-			return fmt.Errorf("failed to save configuration: %w", err)
+			return fmt.Errorf("save authentication: %w", err)
+		}
+		fmt.Println("\nDiscovering your Plex servers...")
+		if err := commands.DiscoverAndSelectServer(cmd.Context()); err != nil {
+			return err
 		}
 
 		fmt.Printf("\nToken and configuration saved to %s\n", cfg.ConfigPath)

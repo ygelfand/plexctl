@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/LukeHagar/plexgo/models/operations"
 	"github.com/spf13/cobra"
 	"github.com/ygelfand/plexctl/internal/commands"
 	"github.com/ygelfand/plexctl/internal/config"
@@ -50,27 +49,20 @@ var serverListCmd = &cobra.Command{
 		ui.AnnotationSkipServerCheck: "true",
 	},
 	RunE: commands.RunWithClient(func(ctx context.Context, client *plex.Client, cmd *cobra.Command, args []string, opts *commands.PlexCtlOptions) error {
-		slog.Debug("SDK: Fetching server resources from plex.tv")
-		res, err := client.SDK.Plex.GetServerResources(ctx, operations.GetServerResourcesRequest{
-			IncludeHTTPS: operations.IncludeHTTPSTrue.ToPointer(),
-			IncludeIPv6:  operations.IncludeIPv6True.ToPointer(),
-			IncludeRelay: operations.IncludeRelayTrue.ToPointer(),
-		})
+		devices, err := plex.DiscoverServers(ctx)
 		if err != nil {
-			slog.Error("SDK: Failed to list servers", "error", err)
-			return fmt.Errorf("failed to list servers: %w", err)
+			return err
 		}
 
-		slog.Debug("SDK: Received server resources", "count", len(res.PlexDevices))
 		return commands.Print(&presenters.ServerListPresenter{
-			Devices: res.PlexDevices,
+			Devices: devices,
 		}, opts)
 	}),
 }
 
 var serverDiscoverCmd = &cobra.Command{
 	Use:   "discover",
-	Short: "Interactive discovery and selection of a Plex server",
+	Short: "Discover and select your own Plex server",
 	Annotations: map[string]string{
 		ui.AnnotationSkipServerCheck: "true",
 	},
@@ -81,9 +73,10 @@ var serverDiscoverCmd = &cobra.Command{
 }
 
 var serverUseCmd = &cobra.Command{
-	Use:   "use [name_or_id]",
-	Short: "Switch to a different configured server",
-	Args:  cobra.ExactArgs(1),
+	Use:         "use [name_or_id]",
+	Short:       "Switch to a different configured server",
+	Args:        cobra.ExactArgs(1),
+	Annotations: map[string]string{ui.AnnotationSkipServerCheck: "true"},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := config.Get()
 		slog.Debug("Config: Switching default server", "target", args[0])

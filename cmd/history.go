@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,31 +27,22 @@ var historyCmd = &cobra.Command{
 
 		var viewedAt *int64
 		if since != "" {
-			d, err := time.ParseDuration(since)
+			d, err := parseHistoryDuration(since)
 			if err != nil {
-				if strings.HasSuffix(since, "d") {
-					val := strings.TrimSuffix(since, "d")
-					var days int
-					fmt.Sscanf(val, "%d", &days)
-					d = time.Duration(days) * 24 * time.Hour
-				} else if strings.HasSuffix(since, "w") {
-					val := strings.TrimSuffix(since, "w")
-					var weeks int
-					fmt.Sscanf(val, "%d", &weeks)
-					d = time.Duration(weeks) * 7 * 24 * time.Hour
-				} else {
-					return fmt.Errorf("invalid duration format (use 1h, 1d, 1w): %w", err)
-				}
+				return fmt.Errorf("invalid duration format (use 1h, 1d, 1w): %w", err)
 			}
 			ts := time.Now().Add(-d).Unix()
 			viewedAt = &ts
 		}
 
 		userMap := make(map[int64]string)
-		uRes, err := client.SDK.Users.GetUsers(ctx, operations.GetUsersRequest{})
-		if err == nil && uRes.Object != nil && uRes.Object.MediaContainer != nil {
-			for _, u := range uRes.Object.MediaContainer.User {
-				userMap[u.ID] = u.Title
+		account, accountErr := plex.NewAccountClient()
+		if accountErr == nil {
+			uRes, err := account.SDK.Users.GetUsers(ctx, operations.GetUsersRequest{})
+			if err == nil && uRes.Object != nil && uRes.Object.MediaContainer != nil {
+				for _, u := range uRes.Object.MediaContainer.User {
+					userMap[u.ID] = u.Title
+				}
 			}
 		}
 
@@ -64,10 +57,12 @@ var historyCmd = &cobra.Command{
 		}
 
 		deviceMap := make(map[string]string)
-		dRes, err := client.SDK.Plex.GetServerResources(ctx, operations.GetServerResourcesRequest{})
-		if err == nil {
-			for _, d := range dRes.PlexDevices {
-				deviceMap[d.ClientIdentifier] = d.Name
+		if accountErr == nil {
+			dRes, err := account.SDK.Plex.GetServerResources(ctx, operations.GetServerResourcesRequest{})
+			if err == nil {
+				for _, d := range dRes.PlexDevices {
+					deviceMap[d.ClientIdentifier] = d.Name
+				}
 			}
 		}
 
@@ -91,6 +86,26 @@ var historyCmd = &cobra.Command{
 			RawData: res.Object.MediaContainer.Metadata,
 		}, opts)
 	}),
+}
+
+func parseHistoryDuration(value string) (time.Duration, error) {
+	var unit time.Duration
+	switch {
+	case strings.HasSuffix(value, "d"):
+		unit = 24 * time.Hour
+	case strings.HasSuffix(value, "w"):
+		unit = 7 * 24 * time.Hour
+	default:
+		return time.ParseDuration(value)
+	}
+	count, err := strconv.ParseInt(value[:len(value)-1], 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parse duration %q: %w", value, err)
+	}
+	if count > math.MaxInt64/int64(unit) || count < math.MinInt64/int64(unit) {
+		return 0, fmt.Errorf("duration %q is out of range", value)
+	}
+	return time.Duration(count) * unit, nil
 }
 
 func init() {

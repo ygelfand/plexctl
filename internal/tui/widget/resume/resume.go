@@ -1,6 +1,7 @@
 package resume
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -8,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	tint "github.com/lrstanley/bubbletint"
+	"github.com/ygelfand/plexctl/internal/config"
 	"github.com/ygelfand/plexctl/internal/tui/player"
 	"github.com/ygelfand/plexctl/internal/ui"
 )
@@ -15,22 +17,24 @@ import (
 type ResumeDecisionMsg struct {
 	Resume   bool
 	Metadata *components.Metadata
-	TctMode  bool
+	Output   config.VideoOutput
 }
 
 type ResumeOverlayModel struct {
+	server   config.ServerTarget
 	Metadata *components.Metadata
-	TctMode  bool
+	Output   config.VideoOutput
 	theme    tint.Tint
 	choice   int // 0: Resume, 1: Start from beginning
 	width    int
 	height   int
+	options  [2]ui.Rect
 }
 
-func NewResumeOverlayModel(metadata *components.Metadata, tctMode bool, theme tint.Tint) *ResumeOverlayModel {
-	return &ResumeOverlayModel{
+func NewResumeOverlayModel(metadata *components.Metadata, output config.VideoOutput, theme tint.Tint, servers ...config.ServerTarget) *ResumeOverlayModel {
+	return &ResumeOverlayModel{server: config.MediaServer(servers...),
 		Metadata: metadata,
-		TctMode:  tctMode,
+		Output:   output,
 		theme:    theme,
 		choice:   0,
 	}
@@ -40,8 +44,22 @@ func (m *ResumeOverlayModel) Init() tea.Cmd {
 	return nil
 }
 
+func (m *ResumeOverlayModel) ActionRows() int { return 1 }
+
 func (m *ResumeOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		if delta := ui.WheelDelta(msg); delta != 0 {
+			m.choice = max(0, min(1, m.choice+delta))
+		} else if ui.LeftClick(msg) {
+			m.View()
+			for i, rect := range m.options {
+				if _, ok := rect.Local(msg); ok {
+					m.choice = i
+					return m.Update(ui.KeyPress("enter"))
+				}
+			}
+		}
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "up", "k":
@@ -51,10 +69,10 @@ func (m *ResumeOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			resume := m.choice == 0
 			offset := int64(0)
-			if resume && m.Metadata.ViewOffset != nil {
+			if resume && m.Metadata != nil && m.Metadata.ViewOffset != nil {
 				offset = int64(*m.Metadata.ViewOffset)
 			}
-			return nil, player.PlayMedia(m.Metadata, false, m.TctMode, offset)
+			return nil, player.PlayMedia(context.Background(), m.Metadata, false, m.Output, offset, m.server)
 		case "esc":
 			return nil, nil
 		}
@@ -66,7 +84,7 @@ func (m *ResumeOverlayModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *ResumeOverlayModel) View() string {
-	boxWidth := 40
+	boxWidth := max(20, min(50, m.width-6))
 	title := "Resume Playback?"
 	if m.Metadata != nil {
 		title = fmt.Sprintf("Resume %s?", m.Metadata.Title)
@@ -77,6 +95,7 @@ func (m *ResumeOverlayModel) View() string {
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(accent).
+		Width(boxWidth - 4).
 		MarginBottom(1)
 
 	optionStyle := lipgloss.NewStyle().PaddingLeft(2)
@@ -107,12 +126,17 @@ func (m *ResumeOverlayModel) View() string {
 		options = append(options, "󰄬 "+selectedStyle.Render("Start from beginning"))
 	}
 
+	heading := titleStyle.Render(title)
+	optionTop := 2 + lipgloss.Height(heading) + 1
+	for i := range m.options {
+		m.options[i] = ui.Rect{X: 3, Y: optionTop + i, Width: boxWidth - 4, Height: 1}
+	}
 	content := lipgloss.JoinVertical(lipgloss.Left,
-		titleStyle.Render(title),
+		heading,
 		"",
 		strings.Join(options, "\n"),
 		"",
-		lipgloss.NewStyle().Foreground(m.theme.BrightBlack()).Render("[↑/↓] Select  [enter] Confirm  [esc] Cancel"),
+		lipgloss.NewStyle().Foreground(m.theme.BrightBlack()).Render("[enter] Confirm | [esc] Cancel"),
 	)
 
 	return lipgloss.NewStyle().

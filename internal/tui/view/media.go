@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/LukeHagar/plexgo/models/components"
 	"github.com/LukeHagar/plexgo/models/operations"
@@ -28,22 +31,33 @@ const (
 )
 
 type MediaView struct {
+	server      config.ServerTarget
 	sectionID   string
 	title       string
-	table       table.Model
+	table       ui.Table
 	posterGrid  *poster.PosterGrid
 	theme       tint.Tint
 	err         error
 	totalItems  int
 	loadedItems int
 	isLoading   bool
+	hasMore     bool
+	requestID   uint64
 	allMetadata []components.Metadata
 	viewMode    ViewMode
+	rail        ui.AlphabetRail
+	contentRect ui.Rect
+	jumpLetter  string
+	jumpEnd     bool
+	jumpNote    string
 
 	details detail.DetailManager
 }
 
-func NewMediaView(sectionID, title string, theme tint.Tint) *MediaView {
+var pageRequestID atomic.Uint64
+
+func NewMediaView(sectionID, title string, theme tint.Tint, servers ...config.ServerTarget) *MediaView {
+	serverTarget := config.MediaServer(servers...)
 	columns := []table.Column{
 		{Title: "W", Width: 3},
 		{Title: "TITLE", Width: 45},
@@ -64,7 +78,7 @@ func NewMediaView(sectionID, title string, theme tint.Tint) *MediaView {
 	}
 
 	_, server, ok := cfg.GetActiveServer()
-	if ok {
+	if ok && serverTarget.ID == cfg.DefaultServer {
 		if opts, ok := server.Libraries.Settings[sectionID]; ok && opts.ViewMode != "" {
 			mode = opts.ViewMode
 		}
@@ -76,13 +90,16 @@ func NewMediaView(sectionID, title string, theme tint.Tint) *MediaView {
 	}
 
 	return &MediaView{
+		server:      serverTarget,
 		sectionID:   sectionID,
 		title:       title,
 		table:       t,
-		posterGrid:  poster.NewPosterGrid(nil, theme),
+		posterGrid:  poster.NewPosterGrid(nil, theme, serverTarget),
 		theme:       theme,
 		viewMode:    vMode,
 		allMetadata: []components.Metadata{},
+		totalItems:  -1,
+		hasMore:     true,
 	}
 }
 
@@ -102,31 +119,45 @@ func (v *MediaView) Refresh() tea.Cmd {
 	}
 	v.allMetadata = nil
 	v.loadedItems = 0
+	v.err = nil
+	v.jumpLetter, v.jumpNote, v.jumpEnd = "", "", false
+	v.totalItems = -1
+	v.hasMore = true
+	v.table.SetRows(nil)
+	v.posterGrid.SetItems(nil)
+	v.posterGrid.SetCursor(0)
+	v.table.SetCursor(0)
 	v.isLoading = true
 	return v.fetchPage(0)
 }
 
 func (v *MediaView) fetchPage(start int) tea.Cmd {
+	sectionID, requestID := v.sectionID, pageRequestID.Add(1)
+	v.requestID = requestID
 	return func() tea.Msg {
-		slog.Debug("MediaView: fetchPage started", "section", v.sectionID, "start", start)
-		client, err := plex.NewClient()
+		page := ui.MediaPageMsg{ServerID: v.server.ID, SectionID: sectionID, RequestID: requestID, Start: start, Total: -1}
+		ctx, cancel := context.WithTimeout(v.server.Context(context.Background()), 30*time.Second)
+		defer cancel()
+		slog.Debug("MediaView: fetchPage started", "section", sectionID, "start", start)
+		client, err := plex.NewClientForContext(ctx)
 		if err != nil {
-			return err
+			page.Err = err
+			return page
 		}
 
 		cfg := config.Get()
-		serverID, _, _ := cfg.GetActiveServer()
 		cm, _ := cache.Get(cfg.CacheDir)
 
 		req := operations.ListContentRequest{
-			SectionID:           v.sectionID,
+			SectionID:           sectionID,
 			XPlexContainerStart: ui.Ptr(start),
 			XPlexContainerSize:  ui.Ptr(100),
+			MediaQuery:          &components.MediaQuery{Sort: ui.Ptr("titleSort:asc")},
 		}
 
 		var body components.MediaContainerWithMetadata
-		err = cache.AutoCache(cm, serverID, req, plex.LibraryCacheTTL, &body, func() (*components.MediaContainerWithMetadata, error) {
-			res, err := client.SDK.Content.ListContent(context.Background(), req)
+		err = cache.AutoCache(cm, v.server.CacheNamespace(), req, plex.LibraryCacheTTL, &body, func() (*components.MediaContainerWithMetadata, error) {
+			res, err := client.SDK.Content.ListContent(ctx, req)
 			if err != nil {
 				return nil, err
 			}
@@ -136,87 +167,126 @@ func (v *MediaView) fetchPage(start int) tea.Cmd {
 			return res.MediaContainerWithMetadata, nil
 		})
 		if err != nil {
-			slog.Error("MediaView fetch error", "error", err)
-			return err
+			page.Err = err
+			return page
 		}
 
 		if body.MediaContainer == nil {
-			return fmt.Errorf("no media container found")
+			page.Err = fmt.Errorf("no media container found")
+			return page
 		}
-
-		total := 0
 		if body.MediaContainer.TotalSize != nil {
-			total = int(*body.MediaContainer.TotalSize)
-		} else {
-			total = len(body.MediaContainer.Metadata)
+			page.Total = int(*body.MediaContainer.TotalSize)
 		}
-
-		slog.Debug("MediaView: fetchPage finished", "section", v.sectionID, "count", len(body.MediaContainer.Metadata), "total", total)
-
-		return ui.MediaPageMsg{Metadata: body.MediaContainer.Metadata, Total: total}
+		page.Metadata = body.MediaContainer.Metadata
+		return page
 	}
 }
 
 func (v *MediaView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if _, ok := msg.(detail.DataMsg); ok && !v.details.Active() {
+		return v, nil
+	}
+	if posterMsg, ok := msg.(poster.PosterLoadedMsg); ok {
+		v.posterGrid.Update(posterMsg)
+	}
 	if v.details.Active() {
+		var parentCmd tea.Cmd
 		// Parent-level updates still happen even if detail is active (like window size)
 		switch m := msg.(type) {
 		case tea.WindowSizeMsg:
-			v.table.SetHeight(ui.GetTableHeight(ui.GetLayout().TotalHeight()))
-			v.table.SetWidth(ui.GetLayout().MainAreaContentWidth())
-			v.posterGrid.Update(m)
+			v.updateBounds()
+			parentCmd = v.posterGrid.Init()
 		case ui.ThemeChangedMsg:
 			v.theme = m.Theme
 			v.posterGrid.Theme = v.theme
-			ui.UpdateTableTheme(&v.table, ui.GetLayout().MainAreaContentWidth(), ui.GetLayout().TotalHeight())
+			ui.UpdateTableTheme(&v.table, v.contentRect.Width, ui.GetLayout().TotalHeight())
+			v.table.SetHeight(v.contentRect.Height)
 		}
 
 		cmd, handled := v.details.Update(msg)
 		if handled {
-			return v, cmd
+			return v, tea.Batch(parentCmd, cmd)
 		}
 	}
 
 	var cmds []tea.Cmd
+	if mouse, ok := msg.(tea.MouseMsg); ok {
+		if letter := v.rail.LetterAt(mouse); letter != "" {
+			return v, v.JumpToLetter(letter)
+		}
+		if _, inside := v.contentRect.Local(mouse); !inside {
+			return v, nil
+		}
+		if v.viewMode == ViewModeList && v.table.Click(mouse) {
+			msg = ui.KeyPress("enter")
+		}
+	}
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		v.table.SetHeight(ui.GetTableHeight(ui.GetLayout().TotalHeight()))
-		v.table.SetWidth(ui.GetLayout().MainAreaContentWidth())
-		v.posterGrid.Update(msg)
+		v.updateBounds()
+		cmds = append(cmds, v.posterGrid.Init())
+		return v, tea.Batch(cmds...)
 	case ui.ThemeChangedMsg:
 		v.theme = msg.Theme
 		v.posterGrid.Theme = v.theme
-		ui.UpdateTableTheme(&v.table, ui.GetLayout().MainAreaContentWidth(), ui.GetLayout().TotalHeight())
+		ui.UpdateTableTheme(&v.table, v.contentRect.Width, ui.GetLayout().TotalHeight())
+		v.table.SetHeight(v.contentRect.Height)
 	case ui.MediaPageMsg:
+		if (msg.ServerID != "" && msg.ServerID != v.server.ID) || msg.SectionID != v.sectionID || msg.RequestID != v.requestID || msg.Start != v.loadedItems {
+			return v, nil
+		}
 		v.isLoading = false
+		v.err = msg.Err
+		if msg.Err != nil {
+			return v, nil
+		}
 		v.totalItems = msg.Total
 		v.allMetadata = append(v.allMetadata, msg.Metadata...)
 		v.loadedItems = len(v.allMetadata)
+		v.hasMore = len(msg.Metadata) > 0 && (msg.Total < 0 || v.loadedItems < msg.Total)
 		v.syncTableRows()
 		cmds = append(cmds, v.posterGrid.SetItems(v.allMetadata))
+		if v.jumpLetter != "" || v.jumpEnd {
+			cmds = append(cmds, v.advanceJump())
+		} else {
+			cmds = append(cmds, v.loadMore())
+		}
 		return v, tea.Batch(cmds...)
 	case poster.PosterLoadedMsg:
 		_, cmd := v.posterGrid.Update(msg)
 		return v, cmd
+	case poster.ItemSelectedMsg:
+		if msg.Metadata.RatingKey != nil {
+			return v, v.ShowDetail(*msg.Metadata.RatingKey, msg.Metadata.Type)
+		}
 	case error:
 		v.err = msg
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "v":
+		case "home":
+			v.jumpLetter, v.jumpNote, v.jumpEnd = "", "", false
+			return v, v.selectIndex(0)
+		case "end":
+			v.jumpLetter, v.jumpNote, v.jumpEnd = "", "", true
+			return v, v.advanceJump()
+		case "esc":
+			v.jumpLetter, v.jumpNote, v.jumpEnd = "", "", false
+			return v, nil
+		case "V":
 			cfg := config.Get()
 			id, server, ok := cfg.GetActiveServer()
 
 			if v.viewMode == ViewModeList {
 				v.viewMode = ViewModePoster
-				v.posterGrid.Cursor = v.table.Cursor()
-				cmds = append(cmds, v.posterGrid.Init())
+				cmds = append(cmds, v.posterGrid.SetCursor(v.table.Cursor()))
 			} else {
 				v.viewMode = ViewModeList
 				v.table.SetCursor(v.posterGrid.Cursor)
 			}
 
-			if ok {
+			if ok && id == v.server.ID {
 				if server.Libraries.Settings == nil {
 					server.Libraries.Settings = make(map[string]config.LibraryOptions)
 				}
@@ -245,6 +315,11 @@ func (v *MediaView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return v, v.ShowDetail(ratingKey, meta.Type)
 			}
 		case "r":
+			if v.err != nil {
+				v.err = nil
+				v.isLoading = true
+				return v, v.fetchPage(v.loadedItems)
+			}
 			return v, v.Refresh()
 		}
 	}
@@ -257,20 +332,103 @@ func (v *MediaView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	cmds = append(cmds, cmd)
 
-	// Lazy loading
-	if !v.isLoading && v.loadedItems > 0 && v.loadedItems < v.totalItems {
-		currIdx := v.table.Cursor()
-		if v.viewMode == ViewModePoster {
-			currIdx = v.posterGrid.Cursor
-		}
-
-		if currIdx > v.loadedItems-20 {
-			v.isLoading = true
-			cmds = append(cmds, v.fetchPage(v.loadedItems))
-		}
-	}
+	cmds = append(cmds, v.loadMore())
 
 	return v, tea.Batch(cmds...)
+}
+
+func (v *MediaView) loadMore() tea.Cmd {
+	if v.isLoading || v.err != nil || !v.hasMore || v.details.Active() {
+		return nil
+	}
+	index := v.table.Cursor()
+	if v.viewMode == ViewModePoster {
+		index = max(v.posterGrid.Cursor, v.posterGrid.LastVisibleIndex())
+	}
+	if index >= v.loadedItems-20 {
+		v.isLoading = true
+		return v.fetchPage(v.loadedItems)
+	}
+	return nil
+}
+
+func (v *MediaView) CanJumpLetters() bool {
+	if v.details.Active() {
+		target, ok := v.details.View.(ui.LetterJumper)
+		return ok && target.CanJumpLetters()
+	}
+	return true
+}
+
+func (v *MediaView) AlphabetRail() *ui.AlphabetRail {
+	if v.details.Active() {
+		if target, ok := v.details.View.(ui.AlphabetNavigator); ok {
+			return target.AlphabetRail()
+		}
+		return nil
+	}
+	if v.err != nil && v.loadedItems == 0 {
+		return nil
+	}
+	return &v.rail
+}
+
+func (v *MediaView) JumpToLetter(letter string) tea.Cmd {
+	if v.details.Active() {
+		if target, ok := v.details.View.(ui.LetterJumper); ok {
+			return target.JumpToLetter(letter)
+		}
+		return nil
+	}
+	letter = strings.ToUpper(letter)
+	if len(letter) != 1 || !strings.Contains(ui.AlphabetLetters, letter) {
+		return nil
+	}
+	v.jumpLetter, v.jumpNote, v.jumpEnd = letter, "", false
+	return v.advanceJump()
+}
+
+func (v *MediaView) selectIndex(index int) tea.Cmd {
+	v.table.SetCursor(index)
+	return v.posterGrid.SetCursor(index)
+}
+
+// A jump reuses already fetched pages, then loads missing metadata as needed.
+// Only visible artwork is fetched; repeated jumps are immediate once loaded.
+func (v *MediaView) advanceJump() tea.Cmd {
+	if v.jumpLetter != "" {
+		if i := ui.AlphabetIndex(v.allMetadata, v.jumpLetter); i >= 0 {
+			v.jumpLetter = ""
+			return v.selectIndex(i)
+		}
+	}
+	if !v.hasMore && !v.isLoading {
+		if v.jumpEnd {
+			v.jumpEnd = false
+			return v.selectIndex(max(0, v.loadedItems-1))
+		}
+		v.jumpNote = "No titles under " + v.jumpLetter
+		v.jumpLetter = ""
+		return nil
+	}
+	if !v.isLoading && v.err == nil {
+		v.isLoading = true
+		return v.fetchPage(v.loadedItems)
+	}
+	return nil
+}
+
+func (v *MediaView) updateBounds() {
+	layout := ui.GetLayout()
+	height := max(1, layout.ContentHeight()-1)
+	v.rail.SetBounds(layout.InnerWidth(), 0, height)
+	rect := ui.Rect{Width: max(1, layout.InnerWidth()-v.rail.Width), Height: height}
+	if rect != v.contentRect {
+		v.contentRect = rect
+		v.table.SetHeight(rect.Height)
+		v.table.SetWidth(rect.Width)
+		v.posterGrid.SetSize(rect.Width, rect.Height)
+	}
 }
 
 func (v *MediaView) GetSectionID() string {
@@ -300,13 +458,15 @@ func (v *MediaView) ShowDetail(ratingKey, mediaType string) tea.Cmd {
 	var dv tea.Model
 	switch mediaType {
 	case "show":
-		dv = detail.NewShowDetailView(ratingKey, v.theme)
+		dv = detail.NewShowDetailView(ratingKey, v.theme, v.server)
 	case "season":
-		dv = detail.NewSeasonDetailView(ratingKey, v.theme)
+		dv = detail.NewSeasonDetailView(ratingKey, v.theme, v.server)
 	case "episode":
-		dv = detail.NewEpisodeDetailView(ratingKey, v.theme)
+		dv = detail.NewEpisodeDetailView(ratingKey, v.theme, v.server)
+	case "artist", "album", "track":
+		dv = detail.NewMusicDetailView(ratingKey, v.theme, v.server)
 	default:
-		dv = detail.NewMovieDetailView(ratingKey, v.theme)
+		dv = detail.NewMovieDetailView(ratingKey, v.theme, v.server)
 	}
 
 	layout := ui.GetLayout()
@@ -323,9 +483,9 @@ func (v *MediaView) HelpKeys() []ui.HelpKey {
 	}
 	return []ui.HelpKey{
 		{Key: "enter", Desc: "View Details"},
-		{Key: "v", Desc: "Toggle View"},
-		{Key: "j/up", Desc: "Move Up"},
-		{Key: "k/down", Desc: "Move Down"},
+		{Key: "V", Desc: "Toggle List / Poster View"},
+		{Key: "k/up", Desc: "Move Up"},
+		{Key: "j/down", Desc: "Move Down"},
 	}
 }
 
@@ -333,12 +493,54 @@ func (v *MediaView) View() string {
 	if v.details.Active() {
 		return v.details.ViewContent()
 	}
-
-	if v.viewMode == ViewModeList {
-		return lipgloss.NewStyle().Render(v.table.View())
+	if v.err != nil && v.loadedItems == 0 {
+		return fmt.Sprintf("Unable to load this page: %v\nPress r to retry.", v.err)
 	}
+	v.updateBounds()
+	content := ""
+	if v.viewMode == ViewModeList {
+		content = v.table.View()
+	} else {
+		content = v.posterGrid.View()
+	}
+	active := v.jumpLetter
+	if active == "" {
+		if meta := v.GetSelectedMetadata(); meta != nil {
+			active = ui.AlphabetLetter(*meta)
+		}
+	}
+	body := lipgloss.JoinHorizontal(lipgloss.Top,
+		lipgloss.NewStyle().Width(v.contentRect.Width).Height(v.contentRect.Height).
+			MaxWidth(v.contentRect.Width).MaxHeight(v.contentRect.Height).Render(content),
+		v.rail.View(active, v.theme))
+	count := fmt.Sprintf("%d loaded", v.loadedItems)
+	if v.totalItems >= 0 {
+		count = fmt.Sprintf("%d / %d", v.loadedItems, v.totalItems)
+	}
+	status := v.jumpNote
+	switch {
+	case v.err != nil:
+		status = "Load failed · [r] Retry"
+	case v.jumpLetter != "":
+		status = "Finding " + v.jumpLetter + " · [esc] Cancel"
+	case v.jumpEnd:
+		status = "Finding last item · [esc] Cancel"
+	case v.isLoading:
+		status = "Loading…"
+	}
+	footer := count + " · [g] A–Z"
+	if v.server.Shared {
+		footer = "Shared · " + v.title + " · " + footer
+	}
+	if status != "" {
+		footer += " · " + status
+	}
+	return body + "\n" + lipgloss.NewStyle().Foreground(v.theme.BrightBlack()).
+		Render(ui.Ellipsis(footer, ui.GetLayout().InnerWidth()))
+}
 
-	return v.posterGrid.View()
+func (v *MediaView) ActionRows() int {
+	return 1
 }
 
 func (v *MediaView) syncTableRows() {
@@ -349,3 +551,5 @@ func (v *MediaView) syncTableRows() {
 	}
 	v.table.SetRows(rows)
 }
+
+func (v *MediaView) MediaServer() config.ServerTarget { return v.server }

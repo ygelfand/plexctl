@@ -15,6 +15,7 @@ type TabManager struct {
 	navbar       *navbar.Navbar
 	activeTabIdx int
 	libCount     int
+	friendsIdx   int
 	sessionsIdx  int
 	historyIdx   int
 	tasksIdx     int
@@ -65,6 +66,14 @@ func (tm *TabManager) setupTabs(data plex.LoaderResult, theme tint.Tint, sidebar
 
 	tm.libCount = len(newModels)
 
+	// Shared libraries never replace the user's own server or library tabs.
+	tm.friendsIdx = len(newModels)
+	friends := view.NewFriendsView(theme)
+	newModels = append(newModels, friends)
+	if tm.activeTabIdx == tm.friendsIdx {
+		cmds = append(cmds, friends.Init())
+	}
+
 	// Status Section
 	tm.sessionsIdx = len(newModels)
 	tm.historyIdx = len(newModels) + 1
@@ -105,6 +114,7 @@ func (tm *TabManager) setupTabs(data plex.LoaderResult, theme tint.Tint, sidebar
 
 	sections := []navbar.NavSection{
 		{Title: "Libraries", Items: libItems},
+		{Title: "Friends Libraries", Items: []navbar.NavItem{{ID: "friends", Title: "Browse", Type: "friends"}}},
 		{Title: "Status", Items: statusItems},
 		{Title: "Search", Items: searchItems},
 	}

@@ -5,6 +5,7 @@ import (
 	"github.com/LukeHagar/plexgo/models/operations"
 	tea "github.com/charmbracelet/bubbletea"
 	tint "github.com/lrstanley/bubbletint"
+	"github.com/ygelfand/plexctl/internal/config"
 )
 
 type HelpKey struct {
@@ -17,6 +18,7 @@ type HelpProvider interface {
 }
 
 type SelectMediaMsg struct {
+	Server    config.ServerTarget
 	RatingKey string
 	Type      string
 	SectionID string
@@ -31,6 +33,7 @@ func (m ThemeChangedMsg) GetTheme() tint.Tint {
 }
 
 type JumpToDetailMsg struct {
+	Server       config.ServerTarget
 	SectionID    string
 	RatingKey    string
 	Type         string
@@ -49,8 +52,13 @@ type SwitchUserMsg struct {
 type InvalidPinMsg struct{}
 
 type MediaPageMsg struct {
-	Metadata []components.Metadata
-	Total    int
+	ServerID  string
+	SectionID string
+	RequestID uint64
+	Start     int
+	Metadata  []components.Metadata
+	Total     int
+	Err       error
 }
 
 type RootChecker interface {
@@ -68,13 +76,15 @@ type PlayableProvider interface {
 }
 
 type RequestPlayMsg struct {
+	Server    config.ServerTarget
 	RatingKey string
-	TctMode   bool
+	Output    config.VideoOutput
 }
 
 type ResumeChoiceMsg struct {
+	Server   config.ServerTarget
 	Metadata *components.Metadata
-	TctMode  bool
+	Output   config.VideoOutput
 }
 
 func Ptr[T any](v T) *T {
@@ -93,4 +103,9 @@ func PtrToString(p *string) string {
 		return ""
 	}
 	return *p
+}
+
+// ServerProvider identifies the server belonging to the current media selection.
+type ServerProvider interface {
+	MediaServer() config.ServerTarget
 }

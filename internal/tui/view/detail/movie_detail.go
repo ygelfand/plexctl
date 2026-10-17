@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	tint "github.com/lrstanley/bubbletint"
+	"github.com/ygelfand/plexctl/internal/config"
 	"github.com/ygelfand/plexctl/internal/plex"
 	"github.com/ygelfand/plexctl/internal/tui/player"
 	"github.com/ygelfand/plexctl/internal/ui"
@@ -18,9 +19,9 @@ type MovieDetailView struct {
 	DetailBase
 }
 
-func NewMovieDetailView(ratingKey string, theme tint.Tint) *MovieDetailView {
+func NewMovieDetailView(ratingKey string, theme tint.Tint, servers ...config.ServerTarget) *MovieDetailView {
 	return &MovieDetailView{
-		DetailBase: NewDetailBase(ratingKey, theme),
+		DetailBase: NewDetailBase(ratingKey, theme, servers...),
 	}
 }
 
@@ -31,12 +32,12 @@ func (v *MovieDetailView) Init() tea.Cmd {
 func (v *MovieDetailView) Refresh() tea.Cmd {
 	v.Loading = true
 	return func() tea.Msg {
-		ctx := context.Background()
+		ctx := v.Server.Context(context.Background())
 		meta, err := plex.GetMetadata(ctx, v.RatingKey, true)
 		if err != nil {
-			return err
+			return v.dataError(err)
 		}
-		return detailDataMsg{metadata: meta}
+		return detailDataMsg{serverID: v.Server.CacheNamespace(), ratingKey: v.RatingKey, metadata: meta}
 	}
 }
 
@@ -45,15 +46,19 @@ func (v *MovieDetailView) GetSelectedMetadata() *components.Metadata {
 }
 
 func (v *MovieDetailView) fetchData() tea.Msg {
-	ctx := context.Background()
+	ctx := v.Server.Context(context.Background())
 	meta, err := plex.GetMetadata(ctx, v.RatingKey, false)
 	if err != nil {
-		return err
+		return v.dataError(err)
 	}
-	return detailDataMsg{metadata: meta}
+	return detailDataMsg{serverID: v.Server.CacheNamespace(), ratingKey: v.RatingKey, metadata: meta}
 }
 
 func (v *MovieDetailView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if !v.Accepts(msg) {
+		return v, nil
+	}
+
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
@@ -75,7 +80,7 @@ func (v *MovieDetailView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (v *MovieDetailView) playTrailer() tea.Cmd {
-	return player.FetchAndPlayTrailer(v.Metadata, false)
+	return player.FetchAndPlayTrailer(context.Background(), v.Metadata, config.VideoWindow, v.Server)
 }
 
 func (v *MovieDetailView) hasTrailer() bool {
@@ -98,8 +103,8 @@ func (v *MovieDetailView) hasTrailer() bool {
 func (v *MovieDetailView) HelpKeys() []ui.HelpKey {
 	keys := []ui.HelpKey{
 		{Key: "esc", Desc: "Back"},
-		{Key: "j/up", Desc: "Scroll Synopsis Up"},
-		{Key: "k/down", Desc: "Scroll Synopsis Down"},
+		{Key: "k/up", Desc: "Scroll Synopsis Up"},
+		{Key: "j/down", Desc: "Scroll Synopsis Down"},
 	}
 	if v.hasTrailer() {
 		keys = append(keys, ui.HelpKey{Key: "t", Desc: "Watch Trailer"})
@@ -110,6 +115,9 @@ func (v *MovieDetailView) HelpKeys() []ui.HelpKey {
 func (v *MovieDetailView) View() string {
 	if v.Loading {
 		return lipgloss.NewStyle().Padding(2).Render("Loading movie details...")
+	}
+	if v.Err != nil {
+		return v.errorView()
 	}
 	if v.Metadata == nil {
 		return "No metadata available"
@@ -193,7 +201,7 @@ func (v *MovieDetailView) View() string {
 
 	mainLayout := v.RenderPosterAndInfo(infoSection)
 
-	footer := "[p] Play "
+	footer := "[p] Play | [v] Terminal "
 	if v.hasTrailer() {
 		footer += "| [t] Trailer "
 	}

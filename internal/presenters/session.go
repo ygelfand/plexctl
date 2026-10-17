@@ -41,7 +41,7 @@ func (p *SessionListPresenter) Rows() [][]string {
 	return rows
 }
 
-func (p *SessionListPresenter) Raw() interface{} {
+func (p *SessionListPresenter) Raw() any {
 	return p.Metadata
 }
 

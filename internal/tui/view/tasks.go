@@ -14,9 +14,11 @@ import (
 )
 
 type TasksTab struct {
-	table  table.Model
-	width  int
-	height int
+	table   ui.Table
+	width   int
+	height  int
+	request viewRequest
+	err     error
 }
 
 func NewTasksTab(theme tint.Tint) *TasksTab {
@@ -28,31 +30,33 @@ func NewTasksTab(theme tint.Tint) *TasksTab {
 	}
 
 	return &TasksTab{
-		table: ui.NewTable(columns, theme),
+		request: newViewRequest(),
+		table:   ui.NewTable(columns, theme),
 	}
 }
 
 func (t *TasksTab) Init() tea.Cmd {
-	return t.fetchTasks
+	return t.Refresh()
 }
 
 func (t *TasksTab) Refresh() tea.Cmd {
-	return t.fetchTasks
+	t.err = nil
+	return t.request.start(t, fetchTasks)
 }
 
-func (t *TasksTab) fetchTasks() tea.Msg {
-	client, err := plex.NewClient()
+func fetchTasks(ctx context.Context) (any, error) {
+	client, err := plex.NewClientForContext(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	res, err := client.SDK.Butler.GetTasks(context.Background())
+	res, err := client.SDK.Butler.GetTasks(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if res.Object == nil || res.Object.ButlerTasks == nil {
-		return fmt.Errorf("no butler tasks found")
+		return nil, fmt.Errorf("no butler tasks found")
 	}
 
 	var rows []table.Row
@@ -85,21 +89,27 @@ func (t *TasksTab) fetchTasks() tea.Msg {
 		})
 	}
 
-	return rows
+	return rows, nil
 }
 
 func (t *TasksTab) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		t.width = msg.Width
+		t.width = ui.GetLayout().InnerWidth()
 		t.height = msg.Height
 		t.table.SetHeight(ui.GetTableHeight(t.height))
 		t.table.SetWidth(t.width)
 	case ui.ThemeChangedMsg:
 		ui.UpdateTableTheme(&t.table, t.width, t.height)
-	case []table.Row:
-		t.table.SetRows(msg)
+	case DataLoadedMsg:
+		if !t.request.accepts(t, msg) {
+			return t, nil
+		}
+		t.err = msg.err
+		if msg.err == nil {
+			t.table.SetRows(msg.data.([]table.Row))
+		}
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "s": // Start task
@@ -122,38 +132,41 @@ func (t *TasksTab) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (t *TasksTab) startTask(name string) tea.Cmd {
-	return func() tea.Msg {
-		client, err := plex.NewClient()
+	return t.request.start(t, func(ctx context.Context) (any, error) {
+		client, err := plex.NewClientForContext(ctx)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		_, err = client.SDK.Butler.StartTask(context.Background(), operations.StartTaskRequest{
+		_, err = client.SDK.Butler.StartTask(ctx, operations.StartTaskRequest{
 			ButlerTask: operations.PathParamButlerTask(name),
 		})
 		if err != nil {
-			return err
+			return nil, err
 		}
-		return t.fetchTasks()
-	}
+		return fetchTasks(ctx)
+	})
 }
 
 func (t *TasksTab) stopTask(name string) tea.Cmd {
-	return func() tea.Msg {
-		client, err := plex.NewClient()
+	return t.request.start(t, func(ctx context.Context) (any, error) {
+		client, err := plex.NewClientForContext(ctx)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		_, err = client.SDK.Butler.StopTask(context.Background(), operations.StopTaskRequest{
+		_, err = client.SDK.Butler.StopTask(ctx, operations.StopTaskRequest{
 			ButlerTask: operations.ButlerTask(name),
 		})
 		if err != nil {
-			return err
+			return nil, err
 		}
-		return t.fetchTasks()
-	}
+		return fetchTasks(ctx)
+	})
 }
 
 func (t *TasksTab) View() string {
+	if t.err != nil {
+		return fmt.Sprintf("Unable to load tasks: %v\n[r] Retry", t.err)
+	}
 	if len(t.table.Rows()) == 0 {
 		return lipgloss.NewStyle().
 			Padding(2).
@@ -167,7 +180,8 @@ func (t *TasksTab) HelpKeys() []ui.HelpKey {
 	return []ui.HelpKey{
 		{Key: "s", Desc: "Start Task"},
 		{Key: "x", Desc: "Stop Task"},
-		{Key: "j/up", Desc: "Move Up"},
-		{Key: "k/down", Desc: "Move Down"},
+		{Key: "j/down", Desc: "Next Row"},
+		{Key: "k/up", Desc: "Previous Row"},
+		{Key: "h/left, l/right", Desc: "Scroll Columns Left / Right"},
 	}
 }

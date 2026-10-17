@@ -1,16 +1,11 @@
 package detail
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"image"
 	"log/slog"
 	"strings"
 	"time"
-
-	_ "image/jpeg"
-	_ "image/png"
 
 	"github.com/LukeHagar/plexgo/models/components"
 	"github.com/charmbracelet/bubbles/list"
@@ -18,18 +13,29 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	tint "github.com/lrstanley/bubbletint"
-	gopixels "github.com/saran13raj/go-pixels"
+	"github.com/ygelfand/plexctl/internal/config"
 	"github.com/ygelfand/plexctl/internal/plex"
+	"github.com/ygelfand/plexctl/internal/tui/artwork"
 	"github.com/ygelfand/plexctl/internal/ui"
 )
 
 // Shared Message Types
-type detailDataMsg struct {
-	metadata *components.Metadata
-	children []components.Metadata
+type detailDataMsg = DataMsg
+
+type DataMsg struct {
+	err       error
+	serverID  string
+	ratingKey string
+	metadata  *components.Metadata
+	children  []components.Metadata
 }
 
-type posterDataMsg string
+type PosterDataMsg struct {
+	serverID  string
+	ratingKey string
+	width     int
+	view      string
+}
 
 type BackToLibraryMsg struct{}
 
@@ -51,9 +57,27 @@ func (i metadataItem) FilterValue() string { return i.metadata.Title }
 
 // Shared Helpers
 
-func fetchPoster(metadata *components.Metadata, width int) tea.Cmd {
+func detailPosterWidth(metadata *components.Metadata) int {
+	if metadata != nil && (metadata.Type == "album" || metadata.Type == "track") {
+		layout := ui.GetLayout()
+		// Leave room for track titles beside the cover and shrink with the player.
+		return max(6, min(ui.DetailPosterWidth, (layout.InnerWidth()-8)/3, (layout.ContentHeight()-10)*2))
+	}
+	return ui.DetailPosterWidth
+}
+
+func fetchPoster(metadata *components.Metadata, width int, servers ...config.ServerTarget) tea.Cmd {
+	server := config.MediaServer(servers...)
+	targetWidth := detailPosterWidth(metadata)
 	return func() tea.Msg {
-		if metadata == nil || metadata.Thumb == nil {
+		if metadata == nil {
+			return nil
+		}
+		path := ui.PtrToString(metadata.Thumb)
+		if metadata.Type == "track" && metadata.ParentThumb != nil {
+			path = *metadata.ParentThumb
+		}
+		if path == "" {
 			return nil
 		}
 
@@ -62,19 +86,19 @@ func fetchPoster(metadata *components.Metadata, width int) tea.Cmd {
 			rk = *metadata.RatingKey
 		}
 
-		targetWidth := ui.DetailPosterWidth
-
 		slog.Debug("fetchPoster start", "title", metadata.Title, "ratingKey", rk, "width", targetWidth)
 
 		// Check long-term cache for rendered string
 		if rk != "" {
-			if cached, ok := plex.GetCachedPoster(rk, targetWidth); ok {
-				return posterDataMsg(cached)
+			if cached, ok := artwork.Cached(server.CacheNamespace()+"/"+rk, targetWidth); ok {
+				return PosterDataMsg{serverID: server.CacheNamespace(), ratingKey: rk, width: targetWidth, view: cached}
 			}
 		}
 
 		start := time.Now()
-		data, err := plex.GetImage(context.Background(), *metadata.Thumb)
+		ctx, cancel := context.WithTimeout(server.Context(context.Background()), 10*time.Second)
+		defer cancel()
+		data, err := plex.GetImage(ctx, path)
 		if err != nil {
 			slog.Error("fetchPoster image fetch failed", "error", err)
 			return nil
@@ -82,25 +106,20 @@ func fetchPoster(metadata *components.Metadata, width int) tea.Cmd {
 		slog.Debug("fetchPoster image fetched", "duration", time.Since(start))
 
 		start = time.Now()
-		img, _, err := image.Decode(bytes.NewReader(data))
+		img, err := artwork.Decode(data)
 		if err != nil {
 			slog.Error("fetchPoster decode failed", "error", err)
 			return nil
 		}
 
-		imgStr, err := gopixels.FromImageStream(img, targetWidth, 0, "halfcell", true)
+		imgStr, err := artwork.Render(server.CacheNamespace()+"/"+rk, img, targetWidth, 0)
 		if err != nil {
 			slog.Error("fetchPoster render failed", "error", err)
 			return nil
 		}
 		slog.Debug("fetchPoster render complete", "duration", time.Since(start))
 
-		// Save to long-term cache
-		if rk != "" {
-			plex.SetCachedPoster(rk, targetWidth, imgStr)
-		}
-
-		return posterDataMsg(imgStr)
+		return PosterDataMsg{serverID: server.CacheNamespace(), ratingKey: rk, width: targetWidth, view: imgStr}
 	}
 }
 

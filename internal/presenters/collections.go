@@ -11,7 +11,7 @@ import (
 type CollectionsPresenter struct {
 	SectionID   string
 	Collections []components.Metadata
-	RawData     interface{}
+	RawData     any
 }
 
 func (p *CollectionsPresenter) Title() string {
@@ -38,7 +38,7 @@ func (p *CollectionsPresenter) Rows() [][]string {
 	return rows
 }
 
-func (p *CollectionsPresenter) Raw() interface{} {
+func (p *CollectionsPresenter) Raw() any {
 	return p.RawData
 }
 

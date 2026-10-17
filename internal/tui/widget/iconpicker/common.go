@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/ygelfand/plexctl/internal/config"
+	"github.com/ygelfand/plexctl/internal/ui"
 )
 
 type Mode int
@@ -103,6 +104,42 @@ func (p *IconPicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		if key := ui.ShortcutAt(p.View(), msg); msg.Y == lipgloss.Height(p.View())-1 && key != "" {
+			return p.Update(ui.KeyPress(key))
+		}
+		if delta := ui.WheelDelta(msg); delta != 0 {
+			key := "down"
+			if delta < 0 {
+				key = "up"
+			}
+			p.handleKeys(ui.KeyPress(key))
+			return p, nil
+		}
+		if ui.LeftClick(msg) {
+			switch p.Mode {
+			case GridMode:
+				row := msg.Y - 2
+				if row >= 0 && row < len(p.Grid) {
+					x := 0
+					for col, icon := range p.Grid[row] {
+						width := lipgloss.Width(icon.Char) + 2
+						if msg.X >= x && msg.X < x+width {
+							p.Row, p.Col = row, col
+							return p.Update(ui.KeyPress("enter"))
+						}
+						x += width
+					}
+				}
+			case SearchMode:
+				index := msg.Y - 4
+				if index >= 0 && index < len(p.Results) {
+					p.ResultIdx = index
+					return p.Update(ui.KeyPress("enter"))
+				}
+			}
+		}
+		return p, nil
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "tab":
@@ -158,6 +195,9 @@ func (p *IconPicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (p *IconPicker) handleKeys(msg tea.KeyMsg) {
 	switch p.Mode {
 	case GridMode:
+		if len(p.Grid) == 0 {
+			return
+		}
 		switch msg.String() {
 		case "left":
 			p.Col = max(0, p.Col-1)
@@ -165,6 +205,7 @@ func (p *IconPicker) handleKeys(msg tea.KeyMsg) {
 			p.Col = min(len(p.Grid[p.Row])-1, p.Col+1)
 		case "up":
 			p.Row = max(0, p.Row-1)
+			p.Col = min(p.Col, len(p.Grid[p.Row])-1)
 		case "down":
 			p.Row = min(len(p.Grid)-1, p.Row+1)
 			if p.Row < len(p.Grid) {
@@ -234,7 +275,7 @@ func (p *IconPicker) View() string {
 		content = p.manualView()
 	}
 
-	help := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).MarginTop(1).Render("tab: switch mode | /: search | enter: select")
+	help := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).MarginTop(1).Render("[tab] Mode | [/] Search | [enter] Select")
 
 	return lipgloss.NewStyle().Width(60).Render(
 		lipgloss.JoinVertical(lipgloss.Left,
@@ -278,7 +319,7 @@ func (p *IconPicker) searchView() string {
 				prefix = "> "
 				b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("62")).Render(fmt.Sprintf("%s %s %s", prefix, e.Char, e.Name)) + "\n")
 			} else {
-				b.WriteString(fmt.Sprintf("%s %s %s\n", prefix, e.Char, e.Name))
+				fmt.Fprintf(&b, "%s %s %s\n", prefix, e.Char, e.Name)
 			}
 		}
 	}

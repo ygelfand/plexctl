@@ -1,9 +1,7 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/sahilm/fuzzy"
@@ -23,15 +21,16 @@ var searchStatusCmd = &cobra.Command{
 	Short: "Show search index status and library statistics",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		idx := search.GetIndex()
+		entries, indexedAt := idx.Snapshot()
 
 		lastIndexed := "Never"
-		if !idx.LastIndexed.IsZero() {
-			lastIndexed = idx.LastIndexed.Format("2006-01-02 15:04:05")
+		if !indexedAt.IsZero() {
+			lastIndexed = indexedAt.Format("2006-01-02 15:04:05")
 		}
 
-		data := map[string]interface{}{
+		data := map[string]any{
 			"last_indexed":  lastIndexed,
-			"total_entries": len(idx.Entries),
+			"total_entries": len(entries),
 		}
 
 		return ui.OutputData{
@@ -39,7 +38,7 @@ var searchStatusCmd = &cobra.Command{
 			Headers: []string{"PROPERTY", "VALUE"},
 			Rows: [][]string{
 				{"Last Indexed", lastIndexed},
-				{"Total Entries", fmt.Sprintf("%d", len(idx.Entries))},
+				{"Total Entries", fmt.Sprintf("%d", len(entries))},
 			},
 			Raw: data,
 		}.Print()
@@ -51,26 +50,24 @@ var searchReindexCmd = &cobra.Command{
 	Short: "Rebuild the local search index",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		progress := make(chan search.IndexProgress, 100)
+		finished := make(chan error, 1)
 		idx := search.GetIndex()
 		theme := ui.CurrentTheme()
 
 		fmt.Println(ui.TitleStyle(theme).Render("Starting Reindex..."))
 
 		go func() {
-			err := idx.Reindex(context.Background(), progress)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "\nError: %v\n", err)
-			}
-			progress <- search.IndexProgress{Message: "DONE"}
+			defer close(progress)
+			finished <- idx.Reindex(cmd.Context(), progress)
 		}()
 
 		for p := range progress {
-			if p.Message == "DONE" {
-				break
-			}
 			fmt.Printf("\r\033[K[%d/%d] %s", p.Current, p.Total, p.Message)
 		}
 		fmt.Println()
+		if err := <-finished; err != nil {
+			return err
+		}
 		fmt.Println(ui.SuccessStyle(theme).Render("Indexing complete!"))
 		return nil
 	},
@@ -83,12 +80,13 @@ var searchFindCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		query := strings.Join(args, " ")
 		idx := search.GetIndex()
+		entries, _ := idx.Snapshot()
 
-		if len(idx.Entries) == 0 {
+		if len(entries) == 0 {
 			return fmt.Errorf("index is empty. Please run 'plexctl search reindex' first")
 		}
 
-		matches := fuzzy.FindFrom(query, entrySource(idx.Entries))
+		matches := fuzzy.FindFrom(query, entrySource(entries))
 
 		if len(matches) == 0 {
 			fmt.Println("No matches found.")
@@ -103,7 +101,7 @@ var searchFindCmd = &cobra.Command{
 			if i >= 20 {
 				break
 			}
-			e := idx.Entries[match.Index]
+			e := entries[match.Index]
 			rows = append(rows, []string{
 				e.RatingKey,
 				e.Title,
@@ -124,7 +122,7 @@ var searchFindCmd = &cobra.Command{
 
 type entrySource []search.IndexEntry
 
-func (s entrySource) String(i int) string { return s[i].Title }
+func (s entrySource) String(i int) string { return s[i].SearchableText() }
 func (s entrySource) Len() int            { return len(s) }
 
 func init() {

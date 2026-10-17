@@ -42,8 +42,8 @@ func (p *NerdFontProvider) normalizeKey(k string) string {
 		}
 		if len(part) > 0 {
 			// Handle underscores if any (e.g. activate_breakpoints)
-			subParts := strings.Split(part, "_")
-			for _, sp := range subParts {
+			subParts := strings.SplitSeq(part, "_")
+			for sp := range subParts {
 				if len(sp) > 0 {
 					runes := []rune(sp)
 					runes[0] = unicode.ToUpper(runes[0])

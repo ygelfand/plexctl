@@ -51,7 +51,7 @@ func (p *HistoryPresenter) Rows() [][]string {
 	return rows
 }
 
-func (p *HistoryPresenter) Raw() interface{} {
+func (p *HistoryPresenter) Raw() any {
 	return p.RawData
 }
 

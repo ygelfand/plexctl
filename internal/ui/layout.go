@@ -40,7 +40,14 @@ type LayoutManager struct {
 	totalWidth   int
 	totalHeight  int
 	playerActive bool
+	playerHeight int
 	theme        tint.Tint
+}
+
+func (l *LayoutManager) SetPlayerHeight(height int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.playerHeight = height
 }
 
 var (
@@ -113,9 +120,9 @@ func (l *LayoutManager) ContentHeight() int {
 	// -2 for main container horizontal borders, -1 for footer
 	h := max(l.totalHeight-3, 0)
 	if l.playerActive {
-		h -= 4 // Space for player bar
+		h -= max(4, l.playerHeight)
 	}
-	return h
+	return max(0, h)
 }
 
 // PosterColumns calculates exactly how many full posters fit in the current inner width

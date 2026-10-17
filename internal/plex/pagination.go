@@ -2,6 +2,9 @@ package plex
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"math"
 
 	"github.com/LukeHagar/plexgo/models/components"
 	"github.com/LukeHagar/plexgo/models/operations"
@@ -20,26 +23,46 @@ func WalkContent(ctx context.Context, all bool, page, count int, walker ContentW
 	if all {
 		size = 100 // doesn't seem to make much of a difference how many per page once it gets here
 	} else {
+		if page < 1 || count < 1 {
+			return nil, fmt.Errorf("page and count must be positive")
+		}
+		if page-1 > math.MaxInt/count {
+			return nil, fmt.Errorf("pagination offset is out of range")
+		}
 		start = (page - 1) * count
 	}
 
+	previousPage := ""
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		metadata, totalSize, err := walker(ctx, start, size)
 		if err != nil {
 			return nil, err
 		}
 
-		allMetadata = append(allMetadata, metadata...)
-
 		if !all {
+			return metadata, nil
+		}
+		if len(metadata) == 0 {
+			if totalSize > int64(start) {
+				return nil, fmt.Errorf("server returned an incomplete content listing")
+			}
 			break
 		}
+		encoded, err := json.Marshal(metadata)
+		if err != nil {
+			return nil, err
+		}
+		if string(encoded) == previousPage {
+			return nil, fmt.Errorf("server did not advance content pagination")
+		}
+		previousPage = string(encoded)
+		allMetadata = append(allMetadata, metadata...)
 
 		start += len(metadata)
 		if totalSize > 0 && int64(start) >= totalSize {
-			break
-		}
-		if len(metadata) == 0 {
 			break
 		}
 	}

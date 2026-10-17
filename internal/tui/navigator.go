@@ -3,6 +3,7 @@ package tui
 import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	tint "github.com/lrstanley/bubbletint"
 	"github.com/ygelfand/plexctl/internal/ui"
 )
@@ -39,6 +40,9 @@ func (n *Navigator) Push(o Overlay) tea.Cmd {
 
 func (n *Navigator) Pop() {
 	if len(n.overlays) > 0 {
+		if closer, ok := n.ActiveOverlay().(interface{ Close() }); ok {
+			closer.Close()
+		}
 		n.overlays = n.overlays[:len(n.overlays)-1]
 	}
 }
@@ -60,6 +64,30 @@ func (n *Navigator) Update(msg tea.Msg) (tea.Cmd, bool) {
 	overlay := n.ActiveOverlay()
 	if overlay == nil {
 		return nil, false
+	}
+	if mouse, ok := msg.(tea.MouseMsg); ok {
+		if ui.RightClick(mouse) {
+			msg = ui.KeyPress("esc")
+		} else {
+			view := overlay.View()
+			width, height := lipgloss.Size(view)
+			rect := ui.Rect{X: max(0, (n.width-width)/2), Y: max(0, (n.height-height)/2),
+				Width: min(width, n.width), Height: min(height, n.height)}
+			local, inside := rect.Local(mouse)
+			if !inside {
+				return nil, true
+			}
+			msg = local
+			// Only declared action bars are clickable shortcuts. An option's
+			// title may itself contain brackets and must remain ordinary text.
+			if actions, ok := overlay.(interface{ ActionRows() int }); ok {
+				if local.Y >= height-2-actions.ActionRows() && local.Y < height-2 {
+					if key := ui.ShortcutAt(view, local); key != "" {
+						msg = ui.KeyPress(key)
+					}
+				}
+			}
+		}
 	}
 
 	newModel, cmd := overlay.Update(msg)

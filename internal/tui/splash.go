@@ -30,7 +30,7 @@ func ShowStandaloneSplash(minDuration time.Duration, resultChan chan<- plex.Load
 
 	// 1. Prepare Worker
 	slog.Debug("Splash: Starting data loader")
-	updates := make(chan interface{}, 10)
+	updates := make(chan any, 10)
 	go plex.LoadData(context.Background(), updates)
 
 	// 2. Render Initial Splash
@@ -38,16 +38,10 @@ func ShowStandaloneSplash(minDuration time.Duration, resultChan chan<- plex.Load
 
 	lines := strings.Split(splashArt, "\n")
 	artHeight := len(lines)
-	startY := (height - artHeight) / 2
-	if startY < 1 {
-		startY = 1
-	}
+	startY := max((height-artHeight)/2, 1)
 
 	// Calculate horizontal centering
-	startX := (width - artWidth) / 2
-	if startX < 1 {
-		startX = 1
-	}
+	startX := max((width-artWidth)/2, 1)
 	padding := strings.Repeat(" ", startX)
 
 	// Print line by line with calculated left padding
@@ -101,9 +95,6 @@ func ShowStandaloneSplash(minDuration time.Duration, resultChan chan<- plex.Load
 }
 
 func centerText(text string, width int) string {
-	padding := (width - len(text)) / 2
-	if padding < 0 {
-		padding = 0
-	}
+	padding := max((width-len(text))/2, 0)
 	return strings.Repeat(" ", padding) + text
 }

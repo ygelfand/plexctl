@@ -1,21 +1,18 @@
 package poster
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"image"
 	"strings"
-
-	_ "image/jpeg"
-	_ "image/png"
+	"time"
 
 	"github.com/LukeHagar/plexgo/models/components"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	tint "github.com/lrstanley/bubbletint"
-	gopixels "github.com/saran13raj/go-pixels"
+	"github.com/ygelfand/plexctl/internal/config"
 	"github.com/ygelfand/plexctl/internal/plex"
+	"github.com/ygelfand/plexctl/internal/tui/artwork"
 	"github.com/ygelfand/plexctl/internal/ui"
 )
 
@@ -23,12 +20,15 @@ type PosterItem struct {
 	Metadata components.Metadata
 	Poster   string
 	Loading  bool
+	Fetching bool
 }
 
 type PosterLoadedMsg struct {
-	ListID int
-	Index  int
-	View   string
+	ServerID  string
+	ListID    int
+	Index     int
+	View      string
+	RatingKey string
 }
 
 type ItemSelectedMsg struct {
@@ -36,16 +36,18 @@ type ItemSelectedMsg struct {
 }
 
 // FetchPoster returns a command to fetch and render a poster
-func FetchPoster(listID int, index int, metadata components.Metadata) tea.Cmd {
+func FetchPoster(listID int, index int, metadata components.Metadata, servers ...config.ServerTarget) tea.Cmd {
+	server := config.MediaServer(servers...)
 	return func() tea.Msg {
 		rk := ""
 		if metadata.RatingKey != nil {
 			rk = *metadata.RatingKey
 		}
+		result := PosterLoadedMsg{ServerID: server.CacheNamespace(), ListID: listID, Index: index, RatingKey: rk}
 
 		if rk != "" {
-			if cached, ok := plex.GetCachedPoster(rk, ui.PosterWidth); ok {
-				return PosterLoadedMsg{ListID: listID, Index: index, View: cached}
+			if cached, ok := artwork.Cached(server.CacheNamespace()+"/"+rk, ui.PosterWidth, ui.PosterHeight); ok {
+				return PosterLoadedMsg{ServerID: server.CacheNamespace(), ListID: listID, Index: index, RatingKey: rk, View: cached}
 			}
 		}
 
@@ -57,31 +59,35 @@ func FetchPoster(listID int, index int, metadata components.Metadata) tea.Cmd {
 		} else if metadata.Thumb != nil {
 			path = *metadata.Thumb
 		}
+		if (metadata.Type == "artist" || metadata.Type == "album") && metadata.Thumb != nil {
+			path = *metadata.Thumb
+		}
+		if metadata.Type == "track" && metadata.ParentThumb != nil {
+			path = *metadata.ParentThumb
+		}
 
 		if path == "" {
-			return nil
+			return result
 		}
 
-		data, err := plex.GetImage(context.Background(), path)
+		ctx, cancel := context.WithTimeout(server.Context(context.Background()), 10*time.Second)
+		defer cancel()
+		data, err := plex.GetImage(ctx, path)
 		if err != nil {
-			return nil
+			return result
 		}
 
-		img, _, err := image.Decode(bytes.NewReader(data))
+		img, err := artwork.Decode(data)
 		if err != nil {
-			return nil
+			return result
 		}
 
-		imgStr, err := gopixels.FromImageStream(img, ui.PosterWidth, 0, "halfcell", true)
+		imgStr, err := artwork.Render(server.CacheNamespace()+"/"+rk, img, ui.PosterWidth, ui.PosterHeight)
 		if err != nil {
-			return nil
+			return result
 		}
 
-		if rk != "" {
-			plex.SetCachedPoster(rk, ui.PosterWidth, imgStr)
-		}
-
-		return PosterLoadedMsg{ListID: listID, Index: index, View: imgStr}
+		return PosterLoadedMsg{ServerID: server.CacheNamespace(), ListID: listID, Index: index, RatingKey: rk, View: imgStr}
 	}
 }
 
@@ -89,10 +95,7 @@ func FetchPoster(listID int, index int, metadata components.Metadata) tea.Cmd {
 func RenderPosterItem(item *PosterItem, isSelected bool, active bool, theme tint.Tint) string {
 	content := item.Poster
 	if item.Loading || content == "" {
-		title := item.Metadata.Title
-		if len(title) > ui.PosterWidth-2 {
-			title = title[:ui.PosterWidth-5] + "..."
-		}
+		title := ui.Ellipsis(item.Metadata.Title, ui.PosterWidth-2)
 		content = "\n\n" + title
 	}
 
@@ -112,6 +115,7 @@ func RenderPosterItem(item *PosterItem, isSelected bool, active bool, theme tint
 	label := GetDisplayTitle(&item.Metadata)
 	labelStyle := lipgloss.NewStyle().
 		Width(ui.PosterWidth).
+		Height(2).
 		Align(lipgloss.Center).
 		Foreground(theme.White()).
 		MaxHeight(2)
@@ -124,7 +128,9 @@ func RenderPosterItem(item *PosterItem, isSelected bool, active bool, theme tint
 	}
 
 	watched := ""
-	if !isSelected || !active {
+	if item.Metadata.Type == "album" && item.Metadata.Year != nil {
+		watched = lipgloss.NewStyle().Foreground(theme.BrightBlack()).Render(fmt.Sprint(*item.Metadata.Year))
+	} else if !isSelected || !active {
 		watched = RenderMiniWatched(&item.Metadata, theme)
 	}
 
@@ -166,16 +172,13 @@ func GetDisplayTitle(meta *components.Metadata) string {
 
 func RenderMiniWatched(meta *components.Metadata, theme tint.Tint) string {
 	if meta.ViewOffset != nil && *meta.ViewOffset > 0 && meta.Duration != nil && *meta.Duration > 0 {
-		percent := float64(*meta.ViewOffset) / float64(*meta.Duration)
+		percent := min(1.0, float64(*meta.ViewOffset)/float64(*meta.Duration))
 		width := ui.PosterWidth - 2
 		filled := int(float64(width) * percent)
 		if filled < 1 && percent > 0 {
 			filled = 1
 		}
-		empty := width - filled
-		if empty < 0 {
-			empty = 0
-		}
+		empty := max(width-filled, 0)
 
 		accent := ui.Accent(theme)
 		bar := lipgloss.NewStyle().Foreground(accent).Render(strings.Repeat("━", filled)) +

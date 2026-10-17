@@ -12,7 +12,7 @@ type Presenter interface {
 	Rows() [][]string
 
 	// Raw returns the underlying data structure for JSON/YAML output
-	Raw() interface{}
+	Raw() any
 
 	// SortableColumns returns a list of columns that can be sorted
 	SortableColumns() []string

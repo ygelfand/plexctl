@@ -3,10 +3,7 @@ package plex
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
-	"net/http/httputil"
-	"os"
 	"runtime"
 	"time"
 
@@ -24,74 +21,61 @@ type loggingTransport struct {
 }
 
 func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	t.cfg.Logger.Debug("SDK Request", "method", req.Method, "url", req.URL.String())
-
-	if t.cfg.Enabled(config.LevelTrace) {
-		dump, err := httputil.DumpRequestOut(req, t.cfg.Verbosity >= 3)
-		if err == nil {
-			t.cfg.Logger.Log(context.Background(), config.LevelTrace, "SDK Request Dump", "dump", string(dump))
-		}
-	}
+	// Headers, bodies, and query strings can contain account tokens, server
+	// resource tokens, or a Home user's PIN. Log only request metadata.
+	t.cfg.Logger.Debug("SDK Request", "method", req.Method, "url", safeURL(req.URL))
 
 	start := time.Now()
 	res, err := t.base.RoundTrip(req)
 	duration := time.Since(start)
 
 	if err != nil {
-		t.cfg.Logger.Error("SDK Request Failed", "error", err, "duration", duration)
+		t.cfg.Logger.Error("SDK Request Failed", "error_type", fmt.Sprintf("%T", err), "duration", duration)
 		return nil, err
 	}
 
-	t.cfg.Logger.Debug("SDK Response", "status", res.Status, "duration", duration)
-
-	if t.cfg.Enabled(config.LevelTrace) {
-		dump, err := httputil.DumpResponse(res, t.verbosityBody())
-		if err == nil {
-			t.cfg.Logger.Log(context.Background(), config.LevelTrace, "SDK Response Dump", "dump", string(dump))
-		}
-	}
+	t.cfg.Logger.Debug("SDK Response", "status", res.StatusCode, "duration", duration)
 
 	return res, nil
 }
 
-func (t *loggingTransport) verbosityBody() bool {
-	return t.cfg.Verbosity >= 3
-}
-
 func NewClient() (*Client, error) {
-	cfg := config.Get()
-
-	// 1. Check for Token (Global)
-	token := os.Getenv("PLEXCTL_TOKEN")
-	source := "env"
-	if token == "" {
-		token = cfg.Token
-		source = "main account"
-		// If a home user access token is set, it overrides the main account token
-		if cfg.HomeUser.AccessToken != "" {
-			token = cfg.HomeUser.AccessToken
-			source = "home user access"
-		}
-	}
-
-	slog.Debug("NewClient: Initializing with token", "source", source)
-	return NewClientWithToken(token)
+	return NewClientWithToken(config.Get().ServerToken())
 }
 
-// NewHomeUserClient specifically uses the V2 AuthToken (general user token)
+// NewAccountClient uses the active Plex account or Home profile for plex.tv.
+func NewAccountClient() (*Client, error) {
+	return NewAccountClientWithToken(config.Get().AccountToken())
+}
+
+// NewAccountClientWithToken keeps a captured account credential independent of
+// the configured media server, including during a Home profile switch.
+func NewAccountClientWithToken(token string) (*Client, error) {
+	return newClient(token, "")
+}
+
+// NewHomeHomeUserClient specifically uses the general user token.
 func NewHomeHomeUserClient() (*Client, error) {
-	cfg := config.Get()
-	token := cfg.Token
-	if cfg.HomeUser.AuthToken != "" {
-		token = cfg.HomeUser.AuthToken
-	}
-	return NewClientWithToken(token)
+	return NewAccountClient()
 }
 
 func NewClientWithToken(token string) (*Client, error) {
 	cfg := config.Get()
-	// 2. Resolve Server (if configured)
 	_, serverCfg, hasServer := cfg.GetActiveServer()
+	serverURL := ""
+	if hasServer {
+		serverURL = serverCfg.URL
+	}
+	return newClient(token, serverURL)
+}
+
+func NewClientForContext(ctx context.Context) (*Client, error) {
+	server := config.ServerFromContext(ctx)
+	return newClient(server.Token, server.URL)
+}
+
+func newClient(token, serverURL string) (*Client, error) {
+	cfg := config.Get()
 
 	if token == "" {
 		return nil, fmt.Errorf("plex token not found. please login with 'plexctl login' or set PLEXCTL_TOKEN")
@@ -101,7 +85,8 @@ func NewClientWithToken(token string) (*Client, error) {
 			base: http.DefaultTransport,
 			cfg:  cfg,
 		},
-		Timeout: 60 * time.Second,
+		Timeout:       60 * time.Second,
+		CheckRedirect: sameOriginRedirect,
 	}
 
 	opts := []plexgo.SDKOption{
@@ -116,8 +101,8 @@ func NewClientWithToken(token string) (*Client, error) {
 		plexgo.WithVersion(config.Version),
 	}
 
-	if hasServer && serverCfg.URL != "" {
-		opts = append(opts, plexgo.WithServerURL(serverCfg.URL))
+	if serverURL != "" {
+		opts = append(opts, plexgo.WithServerURL(serverURL))
 	}
 
 	return &Client{SDK: plexgo.New(opts...)}, nil
@@ -125,5 +110,6 @@ func NewClientWithToken(token string) (*Client, error) {
 
 // HasServer returns true if a default server is configured
 func (c *Client) HasServer() bool {
-	return config.Get().DefaultServer != ""
+	_, server, ok := config.Get().GetActiveServer()
+	return ok && server.URL != ""
 }

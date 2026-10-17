@@ -2,12 +2,11 @@ package plex
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"strings"
+	neturl "net/url"
 	"time"
 
 	"github.com/LukeHagar/plexgo/models/components"
@@ -56,8 +55,8 @@ func SetCachedPoster(ratingKey string, width int, view string) {
 // GetMetadata retrieves full metadata for an item by its rating key. If force is true, cache is bypassed.
 func GetMetadata(ctx context.Context, ratingKey string, force bool) (*components.Metadata, error) {
 	cfg := config.Get()
-	serverID, _, ok := cfg.GetActiveServer()
-	if !ok {
+	server := config.ServerFromContext(ctx)
+	if server.URL == "" {
 		return nil, fmt.Errorf("no active server")
 	}
 
@@ -66,7 +65,7 @@ func GetMetadata(ctx context.Context, ratingKey string, force bool) (*components
 		return nil, err
 	}
 
-	client, err := NewClient()
+	client, err := NewClientForContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +81,7 @@ func GetMetadata(ctx context.Context, ratingKey string, force bool) (*components
 		ttl = 0
 	}
 
-	err = cache.AutoCache(cm, serverID, req, ttl, &body, func() (*components.MediaContainerWithMetadata, error) {
+	err = cache.AutoCache(cm, server.CacheNamespace(), req, ttl, &body, func() (*components.MediaContainerWithMetadata, error) {
 		res, err := client.SDK.Content.GetMetadataItem(ctx, req)
 		if err != nil {
 			return nil, err
@@ -96,7 +95,7 @@ func GetMetadata(ctx context.Context, ratingKey string, force bool) (*components
 		return nil, err
 	}
 
-	if len(body.MediaContainer.Metadata) == 0 {
+	if body.MediaContainer == nil || len(body.MediaContainer.Metadata) == 0 {
 		return nil, fmt.Errorf("metadata empty")
 	}
 
@@ -109,64 +108,14 @@ func ptr[T any](v T) *T {
 
 // GetChildren retrieves children of an item (e.g. seasons of a show, or episodes of a season)
 func GetChildren(ctx context.Context, ratingKey string) ([]components.Metadata, error) {
-	cfg := config.Get()
-	serverID, serverCfg, ok := cfg.GetActiveServer()
-	if !ok {
-		return nil, fmt.Errorf("no active server")
-	}
-
-	cm, err := cache.Get(cfg.CacheDir)
-	if err != nil {
-		return nil, err
-	}
-
-	cacheKey := fmt.Sprintf("%s/children/%s", serverID, ratingKey)
-	var body components.MediaContainerWithMetadata
-	if err := cm.Get(cacheKey, &body); err == nil {
-		return body.MediaContainer.Metadata, nil
-	}
-
-	url := fmt.Sprintf("%s/library/metadata/%s/children", serverCfg.URL, ratingKey)
-	separator := "?"
-	if strings.Contains(url, "?") {
-		separator = "&"
-	}
-	url = fmt.Sprintf("%s%sX-Plex-Token=%s", url, separator, cfg.Token)
-	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch children: %s", resp.Status)
-	}
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := json.Unmarshal(data, &body); err != nil {
-		return nil, fmt.Errorf("failed to parse children: %w", err)
-	}
-
-	if body.MediaContainer == nil {
-		return nil, fmt.Errorf("no media container in children response")
-	}
-
-	_ = cm.Set(cacheKey, body, MediaCacheTTL)
-	return body.MediaContainer.Metadata, nil
+	return metadataListing(ctx, "/library/metadata/"+neturl.PathEscape(ratingKey)+"/children", nil)
 }
 
 // GetImage retrieves image data (thumb/poster) and caches it
 func GetImage(ctx context.Context, path string) ([]byte, error) {
 	cfg := config.Get()
-	serverID, serverCfg, ok := cfg.GetActiveServer()
-	if !ok {
+	server := config.ServerFromContext(ctx)
+	if server.URL == "" {
 		return nil, fmt.Errorf("no active server")
 	}
 
@@ -175,31 +124,42 @@ func GetImage(ctx context.Context, path string) ([]byte, error) {
 		return nil, err
 	}
 
-	cacheKey := fmt.Sprintf("%s/img/%s", serverID, path)
+	cacheKey := fmt.Sprintf("%s/img/%s", server.CacheNamespace(), path)
 	var data []byte
 	if err := cm.Get(cacheKey, &data); err == nil {
 		return data, nil
 	}
 
-	url := fmt.Sprintf("%s%s", serverCfg.URL, path)
-	separator := "?"
-	if strings.Contains(url, "?") {
-		separator = "&"
-	}
-	url = fmt.Sprintf("%s%sX-Plex-Token=%s", url, separator, cfg.Token)
-	resp, err := http.Get(url)
+	u, err := mediaURL(server, path)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Plex-Token", server.Token)
+	resp, err := mediaHTTPClient().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			slog.Debug("Close image response", "error", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("failed to fetch image: %s", resp.Status)
 	}
 
-	data, err = io.ReadAll(resp.Body)
+	const maxImageBytes = 16 << 20
+	data, err = io.ReadAll(io.LimitReader(resp.Body, maxImageBytes+1))
 	if err != nil {
 		return nil, err
+	}
+	if len(data) > maxImageBytes {
+		return nil, fmt.Errorf("plex image exceeds the 16 MiB limit")
 	}
 
 	_ = cm.Set(cacheKey, data, MediaCacheTTL)
@@ -209,7 +169,7 @@ func GetImage(ctx context.Context, path string) ([]byte, error) {
 
 // GetHomeHubs retrieves all promoted hubs for the home screen
 func GetHomeHubs(ctx context.Context) ([]components.Hub, error) {
-	client, err := NewClient()
+	client, err := NewClientForContext(ctx)
 	if err != nil {
 		return nil, err
 	}

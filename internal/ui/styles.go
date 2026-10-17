@@ -125,7 +125,7 @@ type OutputData struct {
 	Title   string
 	Headers []string
 	Rows    [][]string
-	Raw     interface{} // Used for JSON/YAML
+	Raw     any // Used for JSON/YAML
 }
 
 // Print handles the output based on the configured format
@@ -235,7 +235,9 @@ func (d OutputData) printTable() error {
 		}
 	}
 
-	table.Bulk(sanitizedRows)
+	if err := table.Bulk(sanitizedRows); err != nil {
+		return fmt.Errorf("populate table: %w", err)
+	}
 	return table.Render()
 }
 
@@ -248,7 +250,7 @@ func RenderSummary(title string, items []struct{ Label, Value string }) {
 
 	var b strings.Builder
 	for _, item := range items {
-		b.WriteString(fmt.Sprintf("%s %s\n", LabelStyle(theme).Render(item.Label+":"), ValueStyle(theme).Render(item.Value)))
+		fmt.Fprintf(&b, "%s %s\n", LabelStyle(theme).Render(item.Label+":"), ValueStyle(theme).Render(item.Value))
 	}
 	fmt.Println(b.String())
 }

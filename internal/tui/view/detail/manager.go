@@ -25,6 +25,11 @@ func (m *DetailManager) Update(msg tea.Msg) (tea.Cmd, bool) {
 	if m.View == nil {
 		return nil, false
 	}
+	if key, ok := msg.(tea.KeyMsg); ok && key.String() == "r" {
+		if refresher, ok := m.View.(ui.Refreshable); ok {
+			return refresher.Refresh(), true
+		}
+	}
 
 	if _, ok := msg.(BackMsg); ok {
 		if rc, ok := m.View.(ui.RootChecker); !ok || rc.IsAtRoot() {

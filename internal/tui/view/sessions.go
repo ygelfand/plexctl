@@ -3,7 +3,9 @@ package view
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"log/slog"
 
 	"github.com/LukeHagar/plexgo/models/operations"
 	"github.com/charmbracelet/bubbles/table"
@@ -15,9 +17,11 @@ import (
 )
 
 type SessionsTab struct {
-	table  table.Model
-	width  int
-	height int
+	table   ui.Table
+	width   int
+	height  int
+	request viewRequest
+	err     error
 }
 
 func NewSessionsTab(theme tint.Tint) *SessionsTab {
@@ -30,16 +34,18 @@ func NewSessionsTab(theme tint.Tint) *SessionsTab {
 	}
 
 	return &SessionsTab{
-		table: ui.NewTable(columns, theme),
+		request: newViewRequest(),
+		table:   ui.NewTable(columns, theme),
 	}
 }
 
 func (t *SessionsTab) Init() tea.Cmd {
-	return t.fetchSessions
+	return t.Refresh()
 }
 
 func (t *SessionsTab) Refresh() tea.Cmd {
-	return t.fetchSessions
+	t.err = nil
+	return t.request.start(t, fetchSessions)
 }
 
 type sessionData struct {
@@ -62,26 +68,30 @@ type sessionsResponse struct {
 	} `json:"MediaContainer"`
 }
 
-func (t *SessionsTab) fetchSessions() tea.Msg {
-	client, err := plex.NewClient()
+func fetchSessions(ctx context.Context) (any, error) {
+	client, err := plex.NewClientForContext(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	res, err := client.SDK.Status.ListSessions(context.Background())
+	res, err := client.SDK.Status.ListSessions(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	defer res.RawResponse.Body.Close()
+	defer func() {
+		if err := res.RawResponse.Body.Close(); err != nil {
+			slog.Debug("Close sessions response", "error", err)
+		}
+	}()
 	body, err := io.ReadAll(res.RawResponse.Body)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	var sRes sessionsResponse
 	if err := json.Unmarshal(body, &sRes); err != nil {
-		return err
+		return nil, err
 	}
 
 	var rows []table.Row
@@ -95,25 +105,27 @@ func (t *SessionsTab) fetchSessions() tea.Msg {
 		})
 	}
 
-	if len(rows) == 0 {
-		return []table.Row{}
-	}
-
-	return rows
+	return rows, nil
 }
 
 func (t *SessionsTab) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		t.width = msg.Width
+		t.width = ui.GetLayout().InnerWidth()
 		t.height = msg.Height
 		t.table.SetHeight(ui.GetTableHeight(t.height))
 		t.table.SetWidth(t.width)
 	case ui.ThemeChangedMsg:
 		ui.UpdateTableTheme(&t.table, t.width, t.height)
-	case []table.Row:
-		t.table.SetRows(msg)
+	case DataLoadedMsg:
+		if !t.request.accepts(t, msg) {
+			return t, nil
+		}
+		t.err = msg.err
+		if msg.err == nil {
+			t.table.SetRows(msg.data.([]table.Row))
+		}
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "s":
@@ -132,26 +144,29 @@ func (t *SessionsTab) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (t *SessionsTab) stopSession(id string) tea.Cmd {
-	return func() tea.Msg {
-		client, err := plex.NewClient()
+	return t.request.start(t, func(ctx context.Context) (any, error) {
+		client, err := plex.NewClientForContext(ctx)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		reason := "Terminated via plexctl TUI"
-		_, err = client.SDK.Status.TerminateSession(context.Background(), operations.TerminateSessionRequest{
+		_, err = client.SDK.Status.TerminateSession(ctx, operations.TerminateSessionRequest{
 			SessionID: id,
 			Reason:    &reason,
 		})
 		if err != nil {
-			return err
+			return nil, err
 		}
 
-		return t.fetchSessions()
-	}
+		return fetchSessions(ctx)
+	})
 }
 
 func (t *SessionsTab) View() string {
+	if t.err != nil {
+		return fmt.Sprintf("Unable to load sessions: %v\n[r] Retry", t.err)
+	}
 	if len(t.table.Rows()) == 0 {
 		return lipgloss.NewStyle().
 			Padding(2).
@@ -164,7 +179,8 @@ func (t *SessionsTab) View() string {
 func (t *SessionsTab) HelpKeys() []ui.HelpKey {
 	return []ui.HelpKey{
 		{Key: "s", Desc: "Stop Session"},
-		{Key: "j/up", Desc: "Move Up"},
-		{Key: "k/down", Desc: "Move Down"},
+		{Key: "j/down", Desc: "Next Row"},
+		{Key: "k/up", Desc: "Previous Row"},
+		{Key: "h/left, l/right", Desc: "Scroll Columns Left / Right"},
 	}
 }

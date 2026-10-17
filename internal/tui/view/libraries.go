@@ -17,9 +17,11 @@ type LibrarySelectedMsg struct {
 }
 
 type LibrariesTab struct {
-	table  table.Model
-	width  int
-	height int
+	table   ui.Table
+	width   int
+	height  int
+	request viewRequest
+	err     error
 }
 
 func NewLibrariesTab(theme tint.Tint) *LibrariesTab {
@@ -31,31 +33,33 @@ func NewLibrariesTab(theme tint.Tint) *LibrariesTab {
 	}
 
 	return &LibrariesTab{
-		table: ui.NewTable(columns, theme),
+		request: newViewRequest(),
+		table:   ui.NewTable(columns, theme),
 	}
 }
 
 func (t *LibrariesTab) Init() tea.Cmd {
-	return t.fetchLibraries
+	return t.Refresh()
 }
 
 func (t *LibrariesTab) Refresh() tea.Cmd {
-	return t.fetchLibraries
+	t.err = nil
+	return t.request.start(t, fetchLibraries)
 }
 
-func (t *LibrariesTab) fetchLibraries() tea.Msg {
-	client, err := plex.NewClient()
+func fetchLibraries(ctx context.Context) (any, error) {
+	client, err := plex.NewClientForContext(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	res, err := client.SDK.Library.GetSections(context.Background())
+	res, err := client.SDK.Library.GetSections(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if res.Object == nil || res.Object.MediaContainer == nil {
-		return fmt.Errorf("no libraries found")
+		return nil, fmt.Errorf("no libraries found")
 	}
 
 	var rows []table.Row
@@ -81,21 +85,30 @@ func (t *LibrariesTab) fetchLibraries() tea.Msg {
 		})
 	}
 
-	return rows
+	return rows, nil
 }
 
 func (t *LibrariesTab) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
+	if mouse, ok := msg.(tea.MouseMsg); ok && t.table.Click(mouse) {
+		msg = ui.KeyPress("enter")
+	}
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		t.width = msg.Width
+		t.width = ui.GetLayout().InnerWidth()
 		t.height = msg.Height
 		t.table.SetHeight(ui.GetTableHeight(t.height))
 		t.table.SetWidth(t.width)
 	case ui.ThemeChangedMsg:
 		ui.UpdateTableTheme(&t.table, t.width, t.height)
-	case []table.Row:
-		t.table.SetRows(msg)
+	case DataLoadedMsg:
+		if !t.request.accepts(t, msg) {
+			return t, nil
+		}
+		t.err = msg.err
+		if msg.err == nil {
+			t.table.SetRows(msg.data.([]table.Row))
+		}
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "enter":
@@ -118,5 +131,8 @@ func (t *LibrariesTab) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (t *LibrariesTab) View() string {
+	if t.err != nil {
+		return fmt.Sprintf("Unable to load libraries: %v\n[r] Retry", t.err)
+	}
 	return t.table.View()
 }
